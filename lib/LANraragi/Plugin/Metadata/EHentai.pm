@@ -23,9 +23,9 @@ sub plugin_info {
 
     return (
         #Standard metadata
-        name        => "E-Hentai",
+        name        => "E-Hentai Fav",
         type        => "metadata",
-        namespace   => "ehplugin",
+        namespace   => "ehpluginfav",
         login_from  => "ehlogin",
         author      => "Difegue and others",
         version     => "2.6",
@@ -69,6 +69,7 @@ sub get_tags {
     my $gToken = "";
     my $domain = ( $enablepanda ? 'https://exhentai.org' : 'https://e-hentai.org' );
     my $hasSrc = 0;
+    my $syncFavID = 3;
 
     # Quick regex to get the E-H archive ids from the provided url or source tag
     if ( $lrr_info->{oneshot_param} =~ /.*\/g\/([0-9]*)\/([0-z]*)\/*.*/ ) {
@@ -113,6 +114,8 @@ sub get_tags {
         if ( !$hasSrc ) { $hashdata{tags} .= ", source:" . ( split( '://', $domain ) )[1] . "/g/$gID/$gToken"; }
         $hashdata{title} = $ehtitle;
     }
+
+    move_favorite( $ua, $domain, $gID, $gToken, $syncFavID );
 
     #Return a hash containing the new metadata - it will be integrated in LRR.
     return %hashdata;
@@ -292,6 +295,27 @@ sub get_json_from_EH {
     }
 
     return $jsonresponse;
+}
+
+sub move_favorite {
+
+    my ( $ua, $domain, $gID, $gToken, $favID ) = @_;
+    my $uri = "$domain/gallerypopups.php?gid=$gID&t=$gToken&act=addfav";
+    
+    my $logger = get_plugin_logger();
+
+    my $rep = $ua->max_redirects(5)->post(
+        $uri => form => {
+            apply  => 'Add to Favorites',
+            favcat => $favID,
+            update => 1
+        }
+    )-> result;
+
+    if ( $rep->is_error ) {
+        my $code = $rep->code;
+        $logger->info("Error moving favorite (Code: $code, gID: $gID)");
+    }
 }
 
 1;
