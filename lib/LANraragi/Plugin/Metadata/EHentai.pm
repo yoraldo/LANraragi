@@ -1,4 +1,4 @@
-package LANraragi::Plugin::Metadata::EHentai;
+package LANraragi::Plugin::Metadata::EHentaiFav;
 
 use v5.36;
 use experimental 'try';
@@ -259,6 +259,11 @@ sub get_tags_from_EH {
         push( @tags, "uploader:$ehuploader" );
         push( @tags, "timestamp:$ehtimestamp" );
     }
+
+    my $firstGid = @$data[0]->{"first_gid"} ? @$data[0]->{"first_gid"} : $gID;
+    my $firstKey = @$data[0]->{"first_key"} ? @$data[0]->{"first_key"} : $gToken;
+    push( @tags, "first_gid:$firstGid" );
+    push( @tags, "first_key:$firstKey" );
 
     # Unescape title received from the API as it might contain some HTML characters
     $ehtitle = html_unescape($ehtitle);
