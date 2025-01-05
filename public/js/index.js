@@ -98,8 +98,8 @@ Index.initializeAll = function () {
     Server.callAPI("/api/info", "GET", null, "Error getting basic server info!",
         (data) => {
             Index.serverVersion = data.version;
-            Index.debugMode = data.debug_mode === "1";
-            Index.isProgressLocal = data.server_tracks_progress !== "1";
+            Index.debugMode = !!data.debug_mode;
+            Index.isProgressLocal = !data.server_tracks_progress;
             Index.pageSize = data.archives_per_page;
 
             // Check version if not in debug mode
@@ -663,7 +663,7 @@ Index.loadCategories = function () {
             // Sort by pinned + alpha
             // Pinned categories are shown at the beginning
             data.sort((b, a) => b.name.localeCompare(a.name));
-            data.sort((a, b) => a.pinned < b.pinned);
+            data.sort((a, b) => b.pinned - a.pinned);
             let html = "";
 
             const iteration = (data.length > 10 ? 10 : data.length);
