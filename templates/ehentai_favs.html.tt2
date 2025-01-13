@@ -1,0 +1,56 @@
+[% IF favorites.size > 0 %]
+<table>
+    <thead>
+        <tr>
+            <th>Image</th>
+            <th>Title</th>
+            <th>URL</th>
+        </tr>
+    </thead>
+    <tbody>
+        [% FOREACH favorite IN favorites %]
+        <tr id="row-[% favorite.url | html %]" onclick="toggleUrl(this, '[% favorite.url %]')">
+            <td>
+                <img src="[% favorite.image %]" 
+                     alt="[% favorite.title | html %]" 
+                     style="max-width: 100px; height: auto; cursor: pointer;">
+            </td>
+            <td style="cursor: pointer;">
+                [% favorite.title | html %]
+            </td>
+            <td>
+                <a href="[% favorite.url %]" target="_blank">Visit</a>
+            </td>
+        </tr>
+        [% END %]
+    </tbody>
+</table>
+[% ELSE %]
+<br>
+<p>No e-hentai favorites to sync</p>
+[% END %]
+
+<style>
+    .highlight {
+        background-color: #333333; /* Dark grey for selected rows */
+        color: white; /* Adjust text color for better contrast */
+    }
+</style>
+
+<script>
+    function toggleUrl(row, url) {
+        const urlForm = document.getElementById('urlForm');
+        const urls = urlForm.value.split('\n').filter(line => line.trim() !== '');
+
+        if (urls.includes(url)) {
+            // Remove the URL if it exists and unhighlight the row
+            urlForm.value = urls.filter(existingUrl => existingUrl !== url).join('\n');
+            row.classList.remove('highlight');
+        } else {
+            // Add the URL if it doesn't exist and highlight the row
+            urls.push(url);
+            urlForm.value = urls.join('\n');
+            row.classList.add('highlight');
+        }
+    }
+</script>

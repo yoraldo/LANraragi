@@ -86,6 +86,8 @@
 					<span>[% c.lh("Add from URL(s)") %]</span>
 				</span>
 
+				[% INCLUDE ehentai_favs %]
+
 			</div>
 
 			<div class="right-column">
