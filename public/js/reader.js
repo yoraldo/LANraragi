@@ -417,7 +417,7 @@ Reader.initializeSettings = function () {
     Reader.ignoreProgress = localStorage.ignoreProgress === "true" || false;
     Reader.ignoreProgress ? $("#untrack-progress").addClass("toggled") : $("#track-progress").addClass("toggled");
 
-    Reader.infiniteScroll = localStorage.infiniteScroll === "true" || false;
+    Reader.infiniteScroll = localStorage.infiniteScroll === "true" || true;
     $(Reader.infiniteScroll ? "#infinite-scroll-on" : "#infinite-scroll-off").addClass("toggled");
 
     Reader.showOverlayByDefault = localStorage.showOverlayByDefault === "true" || false;
