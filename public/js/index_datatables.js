@@ -57,7 +57,7 @@ IndexTable.initializeAll = function () {
         deferRender: true,
         lengthChange: false,
         pageLength: Index.pageSize,
-        order: [[0, "asc"]],
+        order: [[1, "desc"]],
         dom: "<\"top\"ip>rt<\"bottom\"p><\"clear\">",
         language: {
             info: "Showing _START_ to _END_ of _TOTAL_ ancient chinese lithographies.",

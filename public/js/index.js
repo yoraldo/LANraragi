@@ -37,18 +37,18 @@ Index.initializeAll = function () {
 
     // Default to crop landscape
     if (localStorage.getItem("cropthumbs") === null) {
-        localStorage.cropthumbs = true;
+        localStorage.cropthumbs = false;
     }
 
     // Default custom columns
     if (localStorage.getItem("customColumn1") === null) {
-        localStorage.customColumn1 = "artist";
+        localStorage.customColumn1 = "date_added";
         localStorage.customColumn2 = "series";
     }
 
     // Default to on deck for carousel
     if (localStorage.getItem("carouselType") === null) {
-        localStorage.carouselType = "ondeck";
+        localStorage.carouselType = "random";
     }
 
     // Default to opened carousel
