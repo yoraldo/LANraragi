@@ -23,7 +23,8 @@ sub get_plugins {
 
     my $type    = shift;
     my @plugins = plugins;
-    my @validplugins;
+    my @validplugins_ehen;
+    my @validplugins_other;
     foreach my $plugin (@plugins) {
 
         # Check that the metadata sub is there before invoking it
@@ -35,11 +36,17 @@ sub get_plugins {
             elsif ( $type eq 'download' ) { next if ( !$plugin->can('provide_url') ); }
             elsif ( $type eq 'login' )    { next if ( !$plugin->can('do_login') ); }
 
-            if ( $pluginfo{type} eq $type || $type eq "all" ) { push( @validplugins, \%pluginfo ); }
+            if ( $pluginfo{type} eq $type || $type eq "all" ) {
+                if ( $pluginfo{namespace} eq 'ehpluginfav' ) {
+                    push( @validplugins_ehen, \%pluginfo );
+                } else {
+                    push( @validplugins_other, \%pluginfo );
+                }
+            }
         }
     }
 
-    return @validplugins;
+    return (@validplugins_ehen, @validplugins_other);
 }
 
 # Get a downloader plugin matching the given URL.
