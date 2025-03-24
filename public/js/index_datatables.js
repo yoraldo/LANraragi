@@ -86,7 +86,7 @@ IndexTable.initializeAll = function () {
         deferRender: true,
         lengthChange: false,
         pageLength: Index.pageSize,
-        order: [[0, "asc"]],
+        order: [[1, "desc"]],
         dom: `<"top"ip>rt<"bottom"p><"clear">`,
         language: {
             info: I18N.IndexPageCount,
