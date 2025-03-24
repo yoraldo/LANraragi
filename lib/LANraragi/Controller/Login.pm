@@ -21,7 +21,7 @@ sub check {
         $self->LRR_LOGGER->info( "Successful login attempt from " . $self->tx->remote_address );
 
         $self->session( is_logged  => 1 );
-        $self->session( expiration => 60 * 60 * 24 );
+        $self->session( expiration => 60 * 60 * 24 * 14 );
         $self->redirect_to($redirect);
     } else {
 
@@ -48,7 +48,11 @@ sub logged_in {
       || $self->LRR_CONF->enable_pass == 0;
 
     my $url = $self->url_for("login");
-    $self->redirect_to( $url->query( redirect => "/?sort=1&sortdir=desc&" ) );
+    my $redirectPath = $self->req->url->path_query;
+    if ( $redirectPath eq "/" || $redirectPath eq "" ) {
+        $redirectPath = "/?sort=1&sortdir=desc&";
+    }
+    $self->redirect_to( $url->query( redirect => $redirectPath ) );
     return 0;
 }
 
