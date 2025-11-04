@@ -60,7 +60,7 @@ if [ -f /etc/alpine-release ]; then
       ln -s /opt/perl/bin/perl5.38.0 /usr/bin/perl
 
       # Install cpanm
-      curl -L https://cpanmin.us | perl - App::cpanminus
+      curl -L https://cpanmin.us | perl - --from https://www.cpan.org App::cpanminus
       ln -s /opt/perl/bin/cpanm /usr/bin/cpanm
       cpanm IO::Socket::SSL --notest
 
@@ -69,7 +69,7 @@ if [ -f /etc/alpine-release ]; then
       apk add perl perl-io-socket-ssl perl-dev s6-overlay libjxl imagemagick-perlmagick nodejs npm vips
 
       # Install cpanm
-      curl -L https://cpanmin.us | perl - App::cpanminus
+      curl -L https://cpanmin.us | perl - --from https://www.cpan.org App::cpanminus
   fi
 fi
 
