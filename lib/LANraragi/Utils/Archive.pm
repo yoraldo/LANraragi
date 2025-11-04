@@ -2,6 +2,7 @@ package LANraragi::Utils::Archive;
 
 use v5.36;
 use experimental 'try';
+use feature 'state';
 
 use strict;
 use warnings;
@@ -22,13 +23,17 @@ use Archive::Libarchive qw( ARCHIVE_OK );
 use Archive::Libarchive::Extract;
 use Archive::Libarchive::Peek;
 use File::Temp qw(tempdir);
+use POSIX qw(strerror);
 
 use LANraragi::Utils::TempFolder qw(get_temp);
 use LANraragi::Utils::Logging    qw(get_logger);
 use LANraragi::Utils::Generic    qw(is_image shasum_str);
+use LANraragi::Utils::Redis      qw(redis_decode redis_encode);
+use LANraragi::Utils::Path       qw(create_path);
+use LANraragi::Utils::Resizer    qw(get_resizer);
 
 # Utilitary functions for handling Archives.
-# Relies on Libarchive, ImageMagick and GhostScript for PDFs.
+# Relies on Libarchive (for zip, cbz) and GhostScript (for PDFs).
 use Exporter 'import';
 our @EXPORT_OK =
   qw(is_file_in_archive extract_file_from_archive extract_single_file extract_thumbnail generate_thumbnail get_filelist);
@@ -38,49 +43,21 @@ sub is_pdf {
     return ( $suffix eq ".pdf" );
 }
 
-# use ImageMagick to make a thumbnail, height = 500px (view in index is 280px tall)
-# If use_hq is true, the scale algorithm will be used instead of sample.
+# use a resizer to make a thumbnail, height = 500px (view in index is 280px tall)
+# If use_hq is true, highest-quality resizing will be used (if the resizer support different quality levels).
 # If use_jxl is true, JPEG XL will be used instead of JPEG.
 sub generate_thumbnail ( $data, $thumb_path, $use_hq, $use_jxl ) {
+    my $quality = 50;
+    $quality = 80 if $use_hq;
 
-    no warnings 'experimental::try';
-    my $img = undef;
-    try {
-        require Image::Magick;
-        $img = Image::Magick->new;
-
-        my $format = $use_jxl ? 'jxl' : 'jpg';
-
-        # For JPEG, the size option (or jpeg:size option) provides a hint to the JPEG decoder
-        # that it can reduce the size on-the-fly during decoding. This saves memory because
-        # it never has to allocate memory for the full-sized image
-        if ( $format eq 'jpg' ) {
-            $img->Set( option => 'jpeg:size=500x' );
-        }
-
-        $img->BlobToImage($data);
-
-        # Only use the first frame (relevant for animated gif/webp/whatever)
-        $img = $img->[0];
-
-        # The "-scale" resize operator is a simplified, faster form of the resize command.
-        if ($use_hq) {
-            $img->Scale( geometry => '500x1000' );
-        } else {    # Sample is very fast due to not applying filters.
-            $img->Sample( geometry => '500x1000' );
-        }
-
-        $img->Set( quality => "50", magick => $format );
-        $img->Write($thumb_path);
-    } catch ($e) {
-
-        # Magick is unavailable, do nothing
+    my $resized = get_resizer()->resize_thumbnail( $data, $quality, $use_hq, $use_jxl ? "jxl" : "jpg" );
+    if ( defined($resized) ) {
+        open my $fh, '>:raw', $thumb_path or die;
+        print $fh $resized;
+        close($resized);
+    } else {
         my $logger = get_logger( "Archive", "lanraragi" );
-        $logger->debug("ImageMagick is not available , skipping thumbnail generation: $e");
-    } finally {
-        if (defined($img)) {
-            undef $img;
-        }
+        $logger->debug("Couldn't create thumbnail!");
     }
 }
 
@@ -101,7 +78,7 @@ sub extract_pdf ( $destination, $to_extract ) {
 
     make_path($destination);
 
-    my $gscmd = "gs -dNOPAUSE -sDEVICE=jpeg -r200 -o '$destination/\%d.jpg' '$to_extract'";
+    my $gscmd = "gs -dNOPAUSE -sDEVICE=jpeg -r200 -o \"$destination/\%d.jpg\" \"$to_extract\"";
     $logger->debug("Sending PDF $to_extract to GhostScript...");
     $logger->debug($gscmd);
 
@@ -130,17 +107,14 @@ sub extract_thumbnail ( $thumbdir, $id, $page, $set_cover, $use_hq ) {
     my $file  = $redis->hget( $id, "file" );
 
     # Get first image from archive using filelist
-    my ( $images, $sizes ) = get_filelist($file);
-
-    # Dereference arrays
-    my @filelist        = @$images;
+    my @filelist        = get_filelist($file, $id);
     my $requested_image = $filelist[ $page > 0 ? $page - 1 : 0 ];
 
     die "Requested image not found: $id page $page" unless $requested_image;
     $logger->debug("Extracting thumbnail for $id page $page from $requested_image");
 
     # Extract requested image to temp dir if it doesn't already exist
-    my $arcimg       = extract_single_file( $file, $requested_image );
+    my $arcimg = extract_single_file( $file, $requested_image );
 
     my $thumbname;
     unless ($set_cover) {
@@ -161,7 +135,13 @@ sub extract_thumbnail ( $thumbdir, $id, $page, $set_cover, $use_hq ) {
     }
 
     # Thumbnail generation
-    generate_thumbnail( $arcimg, $thumbname, $use_hq, $use_jxl );
+    no warnings 'experimental::try';
+    try {
+        generate_thumbnail( $arcimg, $thumbname, $use_hq, $use_jxl );
+    } catch ($e) {
+        $logger->error("Thumbnail generation failed for archive '$file' entry '$requested_image' -> '$thumbname': $e");
+        die $e;
+    }
 
     return $thumbname;
 }
@@ -173,22 +153,23 @@ sub expand {
     return lc($file);
 }
 
-# Returns a list of all the files contained in the given archive.
-sub get_filelist ($archive) {
+# Returns a list of all the files contained in the given archive with corresponding archive ID.
+sub get_filelist ($archive, $arcid) {
 
     my $logger = get_logger( "Archive", "lanraragi" );
 
     my @files = ();
-    my @sizes = ();
 
     if ( is_pdf($archive) ) {
 
         # For pdfs, extraction returns images from 1.jpg to x.jpg, where x is the pdf pagecount.
         # Using -dNOSAFER or --permit-file-read is required since GS 9.50, see https://github.com/doxygen/doxygen/issues/7290
+
+        $archive = decode_utf8($archive);    # Decode path before passing it to GhostScript
+
         my $pages = `gs -q -dNOSAFER -sDEVICE=jpeg -c "($archive) (r) file runpdfbegin pdfpagecount = quit"`;
         for my $num ( 1 .. $pages ) {
             push @files, "$num.jpg";
-            push @sizes, 0;
         }
     } else {
 
@@ -196,10 +177,19 @@ sub get_filelist ($archive) {
         $r->support_filter_all;
         $r->support_format_all;
 
+        $archive = create_path( $archive );
+
         my $ret = $r->open_filename( $archive, 10240 );
         if ( $ret != ARCHIVE_OK ) {
-            $logger->error( "Couldn't open archive, libarchive says:" . $r->error_string );
-            die $r->error_string;
+            my $open_filename_errno     = $r->errno;
+            my $open_filename_strerr    = strerror($open_filename_errno);
+            my $archive_exists          = -e $archive ? 'yes' : 'no';
+            my $archive_readable        = -r $archive ? 'yes' : 'no';
+            my $archive_size            = -e $archive ? (-s _) : 'NA';
+            my $open_filename_err   = "Couldn't open archive '$archive' (id:$arcid, exists:$archive_exists; readable:$archive_readable; size:$archive_size)"
+                . "libarchive: " . $r->error_string . " (errno $open_filename_errno: $open_filename_strerr)";
+            $logger->error($open_filename_err);
+            die $r->open_filename_err;
         }
 
         my $e = Archive::Libarchive::Entry->new;
@@ -207,10 +197,21 @@ sub get_filelist ($archive) {
 
             my $filesize = ( $e->size_is_set eq 64 ) ? $e->size : 0;
             my $filename = $e->pathname;
-            if ( is_image($filename) ) {
-                push @files, $filename;
-                push @sizes, $filesize;
+
+            unless ( is_image($filename) ) {
+                $r->read_data_skip;
+                next;
             }
+
+            if ( is_apple_signature_like_path($filename) ) {
+                my $peek = Archive::Libarchive::Peek->new( filename => $archive );
+                if ( is_apple_signature( $peek, $filename ) ) {
+                    $r->read_data_skip;
+                    next;
+                }
+            }
+
+            push @files, $filename;
             $r->read_data_skip;
         }
 
@@ -228,8 +229,59 @@ sub get_filelist ($archive) {
     my @other_pages = grep { !$credit_hash{$_} && !$cover_hash{$_} } @files;
     @files = ( @cover_pages, @other_pages, @credit_pages );
 
-    # Return files and sizes in a hashref
-    return ( \@files, \@sizes );
+    # Return files
+    return @files;
+}
+
+# is_apple_signature(peek, path)
+# Uses libarchive::peek to check AppleDouble/AppleSingle magic.
+# Returns 1 if the file header matches a known Apple fork format, else 0.
+sub is_apple_signature ( $peek, $path ) {
+    my $logger = get_logger( "Archive", "lanraragi" );
+    unless ( defined $peek && defined $path ) {
+        $logger->warn("path or peek are undefined. Skipping.");
+        return 0;
+    }
+
+    $logger->debug("Checking Apple fork magic for: $path");
+    my $data = eval { $peek->file($path) };
+    if ( !$data ) {
+        $logger->debug("Peek returned no data for $path; not ignoring by signature");
+        return 0;
+    }
+    if ( length($data) < 8 ) {
+        $logger->debug("Data too short (<8 bytes) for $path; not ignoring by signature");
+        return 0;
+    }
+
+    my $prefix = substr( $data, 0, 8 );
+    return 0 unless defined $prefix && length($prefix) >= 8;
+
+    # https://ciderpress2.com/formatdoc/AppleSingle-notes.html
+    # AppleSingle: 00 05 16 00, AppleDouble: 00 05 16 07; both big-endian
+    my $is_applesingle = substr( $prefix, 0, 4 ) eq "\x00\x05\x16\x00";
+    my $is_appledouble = substr( $prefix, 0, 4 ) eq "\x00\x05\x16\x07";
+
+    if ($is_appledouble) {
+        $logger->debug("AppleDouble magic matched for $path");
+        return 1;
+    }
+    if ($is_applesingle) {
+        $logger->debug("AppleSingle magic matched for $path");
+        return 1;
+    }
+
+    $logger->debug("Apple fork magic not matched for $path");
+    return 0;
+}
+
+# check if image file is garbage or should be ignored.
+sub is_apple_signature_like_path ($path) {
+    my $p = $path // '';
+    return 1 if $p =~ m{(^|/)__MACOSX/};
+    my ($name) = fileparse($p);
+    return 1 if defined $name && $name =~ /^\._/;
+    return 0;
 }
 
 # Uses libarchive::peek to figure out if $archive contains $file.
@@ -246,7 +298,7 @@ sub is_file_in_archive ( $archive, $wantedname ) {
     $logger->debug("Iterating files of archive $archive, looking for '$wantedname'");
     $Data::Dumper::Useqq = 1;
 
-    my $peek = Archive::Libarchive::Peek->new( filename => $archive );
+    my $peek = Archive::Libarchive::Peek->new( filename => create_path($archive) );
     my $found;
     my @files = $peek->files;
 
@@ -300,7 +352,12 @@ sub extract_single_file ( $archive, $filepath ) {
         $page =~ s/^(\d+).jpg$/$1/;
 
         my ( $fh, $outfile ) = tempfile();
-        my $gscmd = "gs -dNOPAUSE -dFirstPage=$page -dLastPage=$page -sDEVICE=jpeg -r200 -o '$outfile' '$archive'";
+
+        # Decode path before passing it to GhostScript
+        $archive = decode_utf8($archive);
+        $outfile = decode_utf8($outfile);
+
+        my $gscmd = "gs -dNOPAUSE -dFirstPage=$page -dLastPage=$page -sDEVICE=jpeg -r200 -o \"$outfile\" \"$archive\"";
         $logger->debug("Extracting page $filepath from PDF $archive");
         $logger->debug($gscmd);
 
@@ -309,19 +366,14 @@ sub extract_single_file ( $archive, $filepath ) {
     } else {
 
         my $contents = "";
-        my $peek     = Archive::Libarchive::Peek->new( filename => $archive );
-        my @files    = $peek->files;
+        my $peek     = Archive::Libarchive::Peek->new( filename => create_path($archive) );
 
-        for my $name (@files) {
-            my $decoded_name = LANraragi::Utils::Database::redis_decode($name);
-
-            # This sub can receive either encoded or raw filenames, so we have to test for both.
-            if ( $decoded_name eq $filepath || $name eq $filepath ) {
-                $logger->debug("Found file $filepath in archive $archive");
-                $contents = $peek->file($name);
-                last;
-            }
+        # This sub can receive either encoded or raw filenames, so we have to test for both.
+        $contents = $peek->file($filepath) // $peek->file(redis_encode($filepath));
+        if (defined($contents)) {
+            $logger->debug("Found file $filepath in archive $archive");
         }
+
         return $contents;
     }
 }
