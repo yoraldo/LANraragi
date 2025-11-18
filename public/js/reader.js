@@ -828,7 +828,12 @@ Reader.goToPage = async function (page) {
     Reader.showingSinglePage = false;
 
     if (Reader.infiniteScroll) {
-        $("#display img").get(Reader.currentPage).scrollIntoView({ block: "nearest" });
+        let img = $("#display img").get(Reader.currentPage);
+        if (img.height > window.innerHeight) {
+            img.scrollIntoView({ block: 'nearest' });
+        } else {
+            img.scrollIntoView({ block: 'center' });
+        }
     } else {
         $("#img_doublepage").attr("src", "");
         $("#img_doublepage").attr("data-filename", "");
