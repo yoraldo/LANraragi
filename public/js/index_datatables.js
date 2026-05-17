@@ -78,7 +78,7 @@ IndexTable.initializeAll = function () {
         lengthChange: false,
         pageLength: Index.pageSize,
         order: [[1, "desc"]],
-        dom: `<"top"ip>rt<"bottom"p><"clear">`,
+        dom: "<\"top\"ip>rt<\"bottom\"p><\"clear\">",
         language: {
             info: I18N.IndexPageCount,
             infoEmpty: `<h1><br/><i class="fas fa-4x fa-toilet-paper-slash"></i><br/><br/>

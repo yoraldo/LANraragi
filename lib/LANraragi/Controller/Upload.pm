@@ -12,6 +12,8 @@ use LANraragi::Utils::Path    qw(move_path);
 
 use LANraragi::Utils::Logging qw(get_logger);
 
+use LANraragi::Utils::Logging qw(get_logger);
+
 sub process_upload {
     my $self = shift;
 
