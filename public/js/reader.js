@@ -531,13 +531,8 @@ export function initializeSettings() {
     ignoreProgress = localStorage.ignoreProgress === "true" || false;
     ignoreProgress ? $("#untrack-progress").addClass("toggled") : $("#track-progress").addClass("toggled");
 
-<<<<<<< HEAD
-    Reader.infiniteScroll = localStorage.infiniteScroll === "true" || true;
-    $(Reader.infiniteScroll ? "#infinite-scroll-on" : "#infinite-scroll-off").addClass("toggled");
-=======
-    infiniteScroll = localStorage.infiniteScroll === "true" || false;
+    infiniteScroll = localStorage.infiniteScroll === "true" || true;
     $(infiniteScroll ? "#infinite-scroll-on" : "#infinite-scroll-off").addClass("toggled");
->>>>>>> upstream/dev
 
     showOverlayByDefault = localStorage.showOverlayByDefault === "true" || false;
     $(showOverlayByDefault ? "#show-overlay" : "#hide-overlay").addClass("toggled");
