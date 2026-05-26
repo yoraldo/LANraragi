@@ -109,13 +109,13 @@ Reader.initializeAll = function () {
         }
     });
 
-    $(document).on("click.add-toc", ".add-toc", (e) => {
-        const page = +$(e.target).closest("div[page]").attr("page") + 1;
+    $(document).on("click.add-toc", ".add-toc", (e) => { 
+        const page = +$(e.target).closest("div[page]").attr("page") + 1; 
         Reader.addTocSection(page);
 
         // Stop event propagation to avoid going to page
         e.stopPropagation();
-    });
+     });
     $(document).on("click.edit-toc", ".edit-toc", (e) => Reader.addTocSection(Reader.currentChapter.startPage, Reader.currentChapter.name));
     $(document).on("click.remove-toc", ".remove-toc", Reader.removeTocSection);
 
@@ -145,7 +145,7 @@ Reader.initializeAll = function () {
 
     // Load metadata for the requested ID and populate the page
     Reader.loadContentData().then(() => {
-
+      
         document.title = Reader.content.title;
         $(".max-page").text(Reader.content.pages);
 
@@ -179,7 +179,7 @@ Reader.initializeAll = function () {
                 cancelHint: I18N.ReaderClearRating,
                 cancelPlace: 'right',
                 score: rating,
-                click: function (score, element, evt) {
+                click: function(score, element, evt) {
 
                     let tags = LRR.splitTagsByNamespace(Reader.content.tags);
                     let selectedRating = score;
@@ -247,7 +247,7 @@ Reader.loadContentData = function () {
                 Reader.progress = data.progress - 1;
             }
 
-            if (data.toc)
+            if (data.toc) 
                 Reader.content.chapters = LRR.buildChapterObject(data.toc, data.pagecount);
 
             // Check and display warnings for unsupported filetypes
@@ -278,11 +278,11 @@ Reader.removeCategoryBadge = function (categoryId) {
 
 Reader.addTocSection = function (page, currentTitle = null) {
 
-    LRR.closeOverlay();
+    LRR.closeOverlay(); 
     LRR.showPopUp({
         title: I18N.ReaderTocPrompt,
         input: "text",
-        inputPlaceholder: currentTitle || I18N.UntitledChapter,
+        inputPlaceholder: currentTitle || I18N.UntitledChapter, 
         inputAttributes: {
             autocapitalize: "off",
         },
@@ -305,7 +305,7 @@ Reader.addTocSection = function (page, currentTitle = null) {
 
 Reader.removeTocSection = function () {
 
-    LRR.closeOverlay();
+    LRR.closeOverlay(); 
     LRR.showPopUp({
         text: I18N.ReaderDeleteTocPrompt,
         icon: "warning",
@@ -521,13 +521,13 @@ Reader.handleShortcuts = function (e) {
         return;
     }
     switch (e.which) {
-        case 8: // backspace
-            document.location.href = $("#return-to-index").attr("href");
-            break;
-        case 27: // escape
-            LRR.closeOverlay();
-            break;
-        case 32: // spacebar
+    case 8: // backspace
+        document.location.href = $("#return-to-index").attr("href");
+        break;
+    case 27: // escape
+        LRR.closeOverlay();
+        break;
+    case 32: // spacebar
             Reader.spaceScrollProcessInput(e);
             break;
         case 37: // left arrow
@@ -1187,9 +1187,9 @@ Reader.updateArchiveOverlay = function (forceUpdate = false) {
     // If it's already loaded and we're still in the same chapter (or no chapter), do nothing
     if ($("#archivePagesOverlay").attr("loaded") === "true" && !forceUpdate) {
 
-        if ((Reader.currentChapter === null) ||
+        if ((Reader.currentChapter === null) || 
             (Reader.currentPage + 1 >= Reader.currentChapter.startPage &&
-                Reader.currentPage + 1 <= Reader.currentChapter.endPage)) {
+             Reader.currentPage + 1 <= Reader.currentChapter.endPage)) {
             return;
         }
     }
@@ -1212,7 +1212,7 @@ Reader.updateArchiveOverlay = function (forceUpdate = false) {
         }
         chapterOptions += `</select>`;
 
-        if (LRR.isUserLogged())
+        if (LRR.isUserLogged() ) 
             chapterOptions += `<a class="fas fa-pencil-alt edit-toc" href="#" style="padding:8px; font-size:14px" title="${I18N.ReaderEditToc}"/>
                             <a class="fas fa-trash-alt remove-toc" href="#" style="padding:8px; font-size:14px" title="${I18N.ReaderDeleteToc}"/>`;
 
@@ -1232,13 +1232,13 @@ Reader.updateArchiveOverlay = function (forceUpdate = false) {
 
         const thumbCss = (localStorage.cropthumbs === "true") ? "id3" : "id3 nocrop";
         const thumbnailUrl = new LRR.apiURL(`/api/archives/${Reader.id}/thumbnail?page=${page}`);
-
+        
         let thumbnail = `
             <div class='${thumbCss} quick-thumbnail' page='${index}' style='display: inline-block; cursor: pointer'>
                 <span class='page-number'>${I18N.ReaderPage(page)}</span>
                 <img src="${thumbnailUrl}" id="${index}_thumb" loading="lazy" />`;
-
-        if (LRR.isUserLogged())
+        
+        if (LRR.isUserLogged()) 
             thumbnail += `<a href="#" style="padding:12px; top:2%; left:72%;" 
                              title="${I18N.ReaderSetPageAsThumbnail}" 
                              class="fas fa-file-image page-number set-thumbnail"></a>
@@ -1246,10 +1246,10 @@ Reader.updateArchiveOverlay = function (forceUpdate = false) {
                              title="${I18N.ReaderAddToc}" 
                              class="fas fa-book-medical page-number add-toc"></a>`;
 
-        if (Reader.pageThumbnails.includes(index)) thumbnail +=
+        if (Reader.pageThumbnails.includes(index)) thumbnail += 
             `</div>`;
-        else thumbnail +=
-            `<i id="${index}_spinner" class="fa fa-4x fa-circle-notch fa-spin ttspinner" style="display:flex;justify-content: center; align-items: center;"></i>
+        else thumbnail += 
+                `<i id="${index}_spinner" class="fa fa-4x fa-circle-notch fa-spin ttspinner" style="display:flex;justify-content: center; align-items: center;"></i>
             </div>`;
 
         htmlBlob += thumbnail;
@@ -1365,6 +1365,6 @@ Reader.handlePaginator = function () {
     }
 };
 
-Reader.getFilename = function (index) {
+Reader.getFilename = function(index) {
     return new URLSearchParams(Reader.pages[index].split("?")[1]).get("path");
 }
