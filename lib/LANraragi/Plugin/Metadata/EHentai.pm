@@ -70,6 +70,8 @@ sub get_tags {
     my $domain = ( $enablepanda ? 'https://exhentai.org' : 'https://e-hentai.org' );
     my $hasSrc = 0;
     my $syncFavID = 3;
+    my $raw_gID = "";
+    my $raw_gToken = "";
 
     # Quick regex to get the E-H archive ids from the provided url or source tag
     if ( $lrr_info->{oneshot_param} =~ /.*\/g\/([0-9]*)\/([0-z]*)\/*.*/ ) {
@@ -115,7 +117,24 @@ sub get_tags {
         $hashdata{title} = $ehtitle;
     }
 
+    # Parse the note for original gallery URL for gID and gToken
+    my $favNote = get_favorite_note( $ua, $domain, $gID, $gToken );
+    if ( $favNote ne "" ) {
+        if ( $favNote =~ /.*https?:\/\/(exhentai\.org|e-hentai\.org)\/g\/([0-9]*)\/([0-z]*)\/*.*/ ) {
+            $raw_gID    = $2;
+            $raw_gToken = $3;
+            $logger->debug("Found raw gallery $raw_gID / $raw_gToken in favorite note");
+        }
+    }
+
+    # Move to synced category
     move_favorite( $ua, $domain, $gID, $gToken, $syncFavID );
+
+    # Unfavorite RAW gallery
+    if ( $raw_gID ne "" && $raw_gToken ne "" ) {
+        move_favorite( $ua, $domain, $raw_gID, $raw_gToken, "favdel" );
+        $logger->debug("Unfavorited RAW gallery $raw_gID / $raw_gToken");
+    }
 
     #Return a hash containing the new metadata - it will be integrated in LRR.
     return %hashdata;
@@ -297,6 +316,30 @@ sub get_json_from_EH ( $ua, $gID, $gToken ) {
     }
 
     return $jsonresponse;
+}
+
+sub get_favorite_note {
+
+    my ( $ua, $domain, $gID, $gToken ) = @_;
+    my $uri = "$domain/gallerypopups.php?gid=$gID&t=$gToken&act=addfav";
+
+    my $logger = get_plugin_logger();
+
+    my $rep = $ua->max_redirects(5)->get($uri)->result;
+
+    if ( $rep->is_error ) {
+        my $code = $rep->code;
+        $logger->info("Error getting favorite note (Code: $code, gID: $gID)");
+    }
+
+    # get the textarea element with name favnote
+    my $textarea = $rep->dom->at("textarea[name=favnote]");
+    if (!$textarea) {
+        $logger->info("No favorite note found for gID $gID");
+        return "";
+    }
+    
+    return $textarea->text;
 }
 
 sub move_favorite {
