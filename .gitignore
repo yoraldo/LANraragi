@@ -14,3 +14,4 @@ Makefile
 oshino
 temp
 win-dist
+env_vars.sh
