@@ -97,9 +97,10 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
     });
     $(document).on("click.edit-metadata", "#edit-archive", () => LRR.openInNewTab(new LRR.ApiURL(`/edit?id=${id}`)));
     $(document).on("click.delete-archive", "#delete-archive", () => {
+        const isTank = id.startsWith("TANK_");
         LRR.closeOverlay();
         LRR.showPopUp({
-            text: I18N.ConfirmArchiveDeletion,
+            text: isTank ? I18N.ConfirmTankoubonDeletion : I18N.ConfirmArchiveDeletion,
             icon: "warning",
             showCancelButton: true,
             focusConfirm: false,
@@ -108,7 +109,8 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
             confirmButtonColor: "#d33",
         }).then((result) => {
             if (result.isConfirmed) {
-                Server.deleteArchive(id, () => { document.location.href = "./"; });
+                if (isTank) Server.deleteTankoubon(id, () => { document.location.href = "./"; });
+                else Server.deleteArchive(id, () => { document.location.href = "./"; });
             }
         });
     });
@@ -150,8 +152,14 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
 
     $(document).on("click.set-thumbnail", ".set-thumbnail", (e) => {
         const pageNumber = +$(e.target).closest("div[page]").attr("page") + 1;
-        Server.callAPI(`/api/archives/${id}/thumbnail?page=${pageNumber}`,
-            "PUT", I18N.ReaderUpdateThumbnail(pageNumber), I18N.ReaderUpdateThumbnailError, null);
+
+        if (id.startsWith("TANK_")) {
+            Server.callAPI(`/api/tankoubons/${id}/thumbnail?page=${pageNumber}`,
+                "PUT", I18N.ReaderUpdateThumbnail(pageNumber), I18N.ReaderUpdateThumbnailError, null);
+        } else {
+            Server.callAPI(`/api/archives/${id}/thumbnail?page=${pageNumber}`,
+                "PUT", I18N.ReaderUpdateThumbnail(pageNumber), I18N.ReaderUpdateThumbnailError, null);
+        }
 
         // Stop event propagation to avoid going to page
         e.stopPropagation();
@@ -167,6 +175,7 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
         if (!markerMode) return;
 
         $(".reader-image").css("cursor", "");
+        $(".reader-image").css("z-index", 19);
 
         // Compute marker position
         // This basically estimates the percentage of the width and legth of the image
@@ -210,15 +219,16 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
         }).then((result) => {
             $("#overlay-page").hide();
             markerMode = false;
-            //toggleArchiveOverlay();
             if (result.isConfirmed && result.value.trim() !== "") {
-                Server.callAPI(`/api/archives/${id}/stamps/${page}?position=${markerData.x},${markerData.y}&content=${result.value}`, "PUT", "Stamp added!", I18N.StampError,
+                const { arcId, localPage } = getArchiveForPage(page);
+                Server.callAPI(`/api/archives/${arcId}/stamps/${localPage}?position=${markerData.x},${markerData.y}&content=${result.value}`, "PUT", "Stamp added!", I18N.StampError,
                     (data) => {
                         markerData.id = data["stamp_id"];
                         markerData.name = result.value;
 
                         markers.push(markerData);
                         renderMarkers();
+                        checkStampedPages();
                     }
                 );
             } else {
@@ -237,6 +247,7 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
             renderMarkers();
             pageNaviState = true;
             $(".reader-image").css("cursor", "");
+            $(".reader-image").css("z-index", 19);
         }
     });
     $(document).on("click.filter-stamped", "#filter-stamped", filterStampedOverlay);
@@ -257,8 +268,9 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
     force = params.get("force_reload") !== null;
     currentPage = (+params.get("p") || 1) - 1;
 
-    // Remove the "new" tag with an api call
-    Server.callAPI(`/api/archives/${id}/isnew`, "DELETE", null, I18N.ReaderErrorClearingNew, null);
+    // Remove the "new" tag with an api call (archives only; tanks don't have an isnew flag)
+    if (!id.startsWith("TANK_"))
+        Server.callAPI(`/api/archives/${id}/isnew`, "DELETE", null, I18N.ReaderErrorClearingNew, null);
 
     // Load metadata for the requested ID and populate the page
     loadContentData().then(() => {
@@ -286,15 +298,15 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
 
         $("#tagContainer").append(LRR.buildTagsDiv(content.tags));
 
-        const ratyEl = document.querySelector('[data-raty]');
+        const ratyEl = document.querySelector(`[data-raty]`);
         if (ratyEl) {
             const rating = LRR.splitTagsByNamespace(content.tags).rating?.at(0).length;
             new Raty(ratyEl, {
-                starType: 'i',
+                starType: `i`,
                 cancelButton: true,
-                cancelClass: 'fas fa-trash raty-cancel',
+                cancelClass: `fas fa-trash raty-cancel`,
                 cancelHint: I18N.ReaderClearRating,
-                cancelPlace: 'right',
+                cancelPlace: `right`,
                 score: rating,
                 click: function(score, element, evt) {
 
@@ -333,7 +345,7 @@ export function initializeAll(trackProgressLocally, authenticateProgress) {
 export function loadContentData() {
 
     // Initialize content object to hold metadata -- This is a recursive object that will be used to build the page overlay.
-    // (For tanks, content.chapters will hold an array of archive IDs, for archives it'll hold TOC data.)
+    // (For tanks, content.chapters will hold archive chapters that can themselves contain nested chapters from ToCs)
     content = {
         id: id,
         title: "",
@@ -343,36 +355,80 @@ export function loadContentData() {
         summary: ""
     };
 
+    const updateProgress = function(data, id) {
+        // Use localStorage progress value instead of the server one if needed
+        if (state.trackProgressLocally && !(state.authenticateProgress && LRR.isUserLogged())) {
+            progress = localStorage.getItem(`${id}-reader`) - 1 || 0;
+        } else {
+            progress = data.progress - 1;
+        }
+    }
+
     // If the ID is a Tank ID (TANK_xxxx), use the Tankoubon API for metadata
     if (id.startsWith("TANK_")) {
 
-        // TODO
-    }
-    else return Server.callAPI(`/api/archives/${id}/metadata`, "GET", null, I18N.ServerInfoError,
-        (data) => {
-            let { title } = data;
+        return fetch(new LRR.ApiURL(`/api/tankoubons/${id}?include_full_data=true&page=-1`))
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(I18N.ServerInfoError)))
+            .then(data => {
+                const tank = data.result;
+                content.title   = tank.name;
+                content.tags    = tank.tags    || "";
+                content.summary = tank.summary || "";
 
-            content.title = title;
+                content.chapters = [];
+
+                // full_data contains pre-fetched metadata for every archive in order
+                const fullData = tank.full_data || [];
+                // Cumulative offset as we iterate through the arclist
+                let pageOffset = 0;
+
+                fullData.forEach(meta => {
+                    if (!meta) return;
+
+                    // Create archive chapter (with nested ToC chapters if present)
+                    const archiveChapters = LRR.buildTankChapters(meta, pageOffset);
+                    content.chapters.push(...archiveChapters);
+
+                    pageOffset += meta.pagecount || 0;
+                });
+
+                content.pages = pageOffset;
+                updateProgress(tank, id);
+            })
+            .catch(err => LRR.showErrorToast(I18N.ServerInfoError, err));
+    }
+
+    return Server.callAPI(`/api/archives/${id}/metadata`, "GET", null, I18N.ServerInfoError,
+        (data) => {
+            content.title = data.title;
             content.pages = data.pagecount;
             content.tags = data.tags;
             content.summary = data.summary;
 
-            // Use localStorage progress value instead of the server one if needed
-            if (state.trackProgressLocally && !(state.authenticateProgress && LRR.isUserLogged())) {
-                progress = localStorage.getItem(`${id}-reader`) - 1 || 0;
-            } else {
-                progress = data.progress - 1;
-            }
+            updateProgress(data, id);
 
             if (data.toc) 
-                content.chapters = LRR.buildChapterObject(data.toc, data.pagecount);
+                content.chapters = LRR.buildArchiveChapters(data.toc, id, data.pagecount);
 
             // Check and display warnings for unsupported filetypes
             checkFiletypeSupport(data.extension);
-
         }
     );
 }
+
+/**
+ * For Tank mode: map a page number to the archive it belongs to and said archive's local page number.
+ * @param {number} globalPage global page number
+ * @returns {{ arcId: string, localPage: number }}
+ */
+function getArchiveForPage(globalPage) {
+    if (id.startsWith("TANK_")) {
+        const arc = content.chapters.find(a => globalPage >= a.startPage && globalPage <= a.endPage);
+        if (arc)
+            return { arcId: arc.id, localPage: globalPage - arc.startPage + 1 };
+    }
+    return { arcId: id, localPage: globalPage };
+};
 
 /**
  * Adds a removable category flag to the categories section within archive overview.
@@ -407,7 +463,8 @@ export function addTocSection(page, currentTitle = null) {
         reverseButtons: true,
     }).then((result) => {
         if (result.isConfirmed && result.value.trim() !== "") {
-            Server.callAPI(`/api/archives/${id}/toc?page=${page}&title=${result.value}`, "PUT", "Chapter added!", I18N.ReaderTocError,
+            const { arcId, localPage } = getArchiveForPage(page);
+            Server.callAPI(`/api/archives/${arcId}/toc?page=${localPage}&title=${result.value}`, "PUT", "Chapter added!", I18N.ReaderTocError,
                 () => loadContentData().then(() => {
                     updateArchiveOverlay(true);
                     toggleArchiveOverlay();
@@ -433,8 +490,8 @@ export function removeTocSection() {
         confirmButtonColor: "#d33",
     }).then((result) => {
         if (result.isConfirmed) {
-            let page = currentChapter.startPage;
-            Server.callAPI(`/api/archives/${id}/toc?page=${page}`, "DELETE", "Chapter removed!", I18N.ReaderTocError,
+            const { arcId, localPage } = getArchiveForPage(currentChapter.startPage);
+            Server.callAPI(`/api/archives/${arcId}/toc?page=${localPage}`, "DELETE", "Chapter removed!", I18N.ReaderTocError,
                 () => loadContentData().then(() => {
                     updateArchiveOverlay(true);
                     toggleArchiveOverlay();
@@ -447,65 +504,84 @@ export function removeTocSection() {
 }
 
 export function loadImages() {
-    Server.callAPI(`/api/archives/${id}/files?force=${force}`, "GET", null, I18N.ReaderArchiveError,
-        (data) => {
-            pages = data.pages;
-            maxPage = pages.length - 1;
-            $(".max-page").html(pages.length);
 
-            // Choices in order for page picking:
-            // * p is in parameters and is not the first page
-            // * progress is tracked and is not the last page
-            // * first page
-            // This allows for bookmarks to trump progress
-            // when there's no parameter, null is coerced to 0 so it becomes -1
-            currentPage = currentPage || (
-                !ignoreProgress && progress < maxPage
-                    ? progress
-                    : 0
-            );
+    const onLoad = (data) => {
+        pages = data;
+        maxPage = pages.length - 1;
+        $(".max-page").html(pages.length);
 
-            if (infiniteScroll) {
-                initInfiniteScrollView();
-                if (content.tags?.includes("webtoon")) {
-                    $("head").append(`
-                        <style id="webtoon-css">
-                            .reader-image {
-                                margin-bottom: 0 !important;
-                                margin-top: 0 !important;
-                            }
-                        </style>
-                    `);
-                }
-            } else {
-                $("#img").on("load", updateMetadata);
+        // Choices in order for page picking:
+        // * p is in parameters and is not the first page
+        // * progress is tracked and is not the last page
+        // * first page
+        // This allows for bookmarks to trump progress
+        // when there's no parameter, null is coerced to 0 so it becomes -1
+        currentPage = currentPage || (
+            !ignoreProgress && progress < maxPage
+                ? progress
+                : 0
+        );
 
-                // when click left or right img area change page
-                $(document).on("click", (event) => {
-                    // check click Y position is in img Y area
-                    if ($(event.target).closest("#i3").length && !$("#overlay-shade").is(":visible") && pageNaviState) {
-                        // is click X position is left on screen or right
-                        if (event.pageX < $(window).width() / 2) {
-                            changePage(-1, true);
-                        } else {
-                            changePage(1, true);
+        if (infiniteScroll) {
+            initInfiniteScrollView();
+            if (content.tags?.includes("webtoon")) {
+                $("head").append(`
+                    <style id="webtoon-css">
+                        .reader-image {
+                            margin-bottom: 0 !important;
+                            margin-top: 0 !important;
                         }
-                    }
-                });
-
-                $(".current-page").each((_i, el) => $(el).html(currentPage + 1));
-                goToPage(currentPage);
+                    </style>
+                `);
             }
+        } else {
+            $("#img").on("load", updateMetadata);
 
-            if (showOverlayByDefault) { toggleArchiveOverlay(); }
-        },
-    ).finally(() => {
+            // when click left or right img area change page
+            $(document).on("click", (event) => {
+                // check click Y position is in img Y area
+                if ($(event.target).closest("#i3").length && !$("#overlay-shade").is(":visible") && pageNaviState) {
+                    // is click X position is left on screen or right
+                    if (event.pageX < $(window).width() / 2) {
+                        changePage(-1, true);
+                    } else {
+                        changePage(1, true);
+                    }
+                }
+            });
+
+            $(".current-page").each((_i, el) => $(el).html(currentPage + 1));
+            goToPage(currentPage);
+        }
+
+        if (showOverlayByDefault) { toggleArchiveOverlay(); }
+    };
+
+    const onFinally = () => {
         if (pages === undefined) {
             $("#img").attr("src", new LRR.ApiURL("/img/flubbed.gif").toString());
             $("#display").append(`<h2>${I18N.ReaderArchiveError}</h2>`);
         }
         generateThumbnails();
-    });
+    };
+
+    if (id.startsWith("TANK_")) {
+        // For tanks: fetch pages for each archive and concatenate them
+        Promise.all(
+            content.chapters.map(arc =>
+                fetch(new LRR.ApiURL(`/api/archives/${arc.id}/files?force=${force}`))
+                    .then(r => r.ok ? r.json() : Promise.reject())
+            )
+        ).then(results => {
+            onLoad(results.flatMap(r => r.pages));
+        }).catch(() => LRR.showErrorToast(I18N.ReaderArchiveError))
+            .finally(onFinally);
+    }
+    else {
+        Server.callAPI(`/api/archives/${id}/files?force=${force}`, "GET", null, I18N.ReaderArchiveError,
+            (data) => onLoad(data.pages),
+        ).finally(onFinally);
+    }
 }
 
 export function initializeSettings() {
@@ -701,7 +777,9 @@ function handleShortcuts(e) {
             document.location.href = new LRR.ApiURL("/random");
             break;
         case 83: // s
-            addStamp();
+            if (!infiniteScroll) {
+                addStamp();
+            }
             break;
         default:
             break;
@@ -849,18 +927,20 @@ function toggleHelp() {
 }
 
 function addStamp() {
+    if (infiniteScroll) return;
     markerMode = true;
     clearMarkers();
     $(".reader-image").css("cursor", "cell");
+    $(".reader-image").css("z-index", 22);
     $("#overlay-page").show();
 }
 
 function createMarkerElement(markerData, index) {
-    if (markerData.left) {
-        const img = document.getElementById("img");
-    } else {
-        const img = document.getElementById("img_doublepage");
-    }
+    if (infiniteScroll) return;
+    const img = markerData.left
+        ? document.getElementById("img")
+        : document.getElementById("img_doublepage");
+
 
     const display = document.getElementById("display");
     const container = document.getElementById("i1");
@@ -960,6 +1040,7 @@ function createMarkerElement(markerData, index) {
 }
 
 function renderMarkers() {
+    if (infiniteScroll) return;
     // Clean markers
     const existing = document.querySelectorAll(".marker");
     existing.forEach(el => el.remove());
@@ -984,14 +1065,14 @@ function toggleStamps() {
 }
 
 function loadStamps(currentPage) {
+    if (infiniteScroll) return;
     markers = [];
+    const { arcId: id1, localPage: p1 } = getArchiveForPage(currentPage);
     // Call for the first page
-    Server.callAPI(`/api/archives/${id}/stamps/${currentPage}`, "GET", null, I18N.ServerInfoError,
+    Server.callAPI(`/api/archives/${id1}/stamps/${p1}`, "GET", null, I18N.ServerInfoError,
         (data) => {
-            let markerData = {};
-
             for (var i = data.result.length - 1; i >= 0; i--) {
-                markerData = {};
+                let markerData = {};
                 let x = data.result[i].position.split(",")[0];
                 let y = data.result[i].position.split(",")[1];
                 markerData.x = x;
@@ -1005,13 +1086,12 @@ function loadStamps(currentPage) {
             if (doublePageMode && currentPage > 0
             && currentPage < maxPage) {
 
-                // Call for the second page
-                Server.callAPI(`/api/archives/${id}/stamps/${currentPage+1}`, "GET", null, I18N.ServerInfoError,
+                const { arcId: id2, localPage: p2 } = getArchiveForPage(currentPage + 1);
+                // Call for the second page (may be in a different archive for tanks)
+                Server.callAPI(`/api/archives/${id2}/stamps/${p2}`, "GET", null, I18N.ServerInfoError,
                     (data) => {
-                        let markerData = {};
-
                         for (var i = data.result.length - 1; i >= 0; i--) {
-                            markerData = {};
+                            let markerData = {};
                             let x = data.result[i].position.split(",")[0];
                             let y = data.result[i].position.split(",")[1];
                             markerData.x = x;
@@ -1035,17 +1115,18 @@ function loadStamps(currentPage) {
 }
 
 function handleMarkerContextMenu(option, index) {
+    if (infiniteScroll) return;
     let i = parseInt(index);
 
     switch (option) {
-        case "editmarker":
+        case "editmarker": {
             let emarker = markers[i];
             let inputValue = emarker.name;
 
             LRR.showPopUp({
                 title: I18N.StampName,
                 input: "text",
-                inputPlaceholder:  I18N.StampPlaceholder,
+                inputPlaceholder: I18N.StampPlaceholder,
                 inputAttributes: {
                     autocapitalize: "off",
                 },
@@ -1067,15 +1148,20 @@ function handleMarkerContextMenu(option, index) {
                 }
             });
             break;
-        case "deletemarker":
+        }
+        case "deletemarker": {
             let dmarker = markers[i];
             Server.callAPI(`/api/stamps/${dmarker.id}`, "DELETE", "Stamp deleted!", I18N.StampError,
                 () => {
                     markers.splice(i, 1);
                     renderMarkers();
+                    if (markers.length == 0) {
+                        checkStampedPages();
+                    }
                 }
             );
             break;
+        }
         default:
             break;
     }
@@ -1275,18 +1361,21 @@ function updateProgress() {
     // Clear markers
     markers = [];
     renderMarkers();
+
+    let page = currentPage + 1; // progress is 1-indexed
+
     // Send an API request to update progress on the server
     if (state.authenticateProgress && LRR.isUserLogged()) {
-        Server.updateServerSideProgress(id, currentPage + 1);
+        Server.updateServerSideProgress(id, page);
     } else if (state.trackProgressLocally) {
-        localStorage.setItem(`${id}-reader`, currentPage + 1);
+        localStorage.setItem(`${id}-reader`, page);
     } else if (!state.authenticateProgress) {
-        Server.updateServerSideProgress(id, currentPage + 1);
+        Server.updateServerSideProgress(id, page);
     }
 
     // Load stamps
     if (!infiniteScroll) {
-        const stamps = loadStamps(currentPage + 1);
+        const stamps = loadStamps(page);
     }
 }
 
@@ -1426,6 +1515,7 @@ function toggleProgressTracking() {
 }
 
 function toggleInfiniteScroll() {
+    clearMarkers();
     infiniteScroll = localStorage.infiniteScroll = !infiniteScroll;
     $("#toggle-infinite-scroll input").toggleClass("toggled");
     window.location.reload();
@@ -1539,17 +1629,24 @@ function handleFullScreen(enableFullscreen = false) {
 }
 
 function getCurrentChapter() {
-    let currentChapter = null;
+    return findChapterForPage(currentPage + 1, content.chapters);
+}
 
-    if (content.chapters) {
-        content.chapters.forEach((chapter) => {
-            if (currentPage + 1 >= chapter.startPage &&
-                currentPage + 1 <= chapter.endPage) {
-                currentChapter = chapter;
+// Find the current chapter (or nested sub-chapter) for the given page.
+function findChapterForPage(page, chapters) {
+    if (!chapters) return null;
+
+    for (const chapter of chapters) {
+        if (page >= chapter.startPage && page <= chapter.endPage) {
+            // Check if there's a more specific nested chapter
+            if (chapter.chapters && chapter.chapters.length > 0) {
+                const nested = findChapterForPage(page, chapter.chapters);
+                if (nested) return nested;
             }
-        });
+            return chapter;
+        }
     }
-    return currentChapter;
+    return null;
 }
 
 function updateArchiveOverlay(forceUpdate = false) {
@@ -1566,6 +1663,12 @@ function updateArchiveOverlay(forceUpdate = false) {
         }
     }
 
+    // Reset stamp filter state when the overlay is rebuilt for a new chapter
+    if (overlayFiltered) {
+        overlayFiltered = false;
+        $("#filter-stamped").removeClass("toggled");
+    }
+
     // Otherwise, update chapter and overlay -- If there are no chapters defined, just show all pages
     currentChapter = getCurrentChapter();
     let firstPage = currentChapter ? currentChapter.startPage : 1;
@@ -1577,14 +1680,21 @@ function updateArchiveOverlay(forceUpdate = false) {
         // Create <select> options for jumping to other chapters
         let chapterOptions = `<select class="favtag-btn" id="chapter-select">`;
         if (content.chapters) {
-            content.chapters.forEach((chapter, index) => {
+            content.chapters.forEach((chapter) => {
                 const selected = (currentChapter && chapter.startPage === currentChapter.startPage) ? "selected" : "";
                 chapterOptions += `<option value="${chapter.startPage}" ${selected}>${chapter.name}</option>`;
+
+                if (chapter.chapters && chapter.chapters.length > 0) {
+                    chapter.chapters.forEach((subChapter) => {
+                        const subSelected = (currentChapter && subChapter.startPage === currentChapter.startPage) ? "selected" : "";
+                        chapterOptions += `<option value="${subChapter.startPage}" ${subSelected}>&nbsp;&nbsp;&nbsp;${subChapter.name}</option>`;
+                    });
+                }
             });
         }
         chapterOptions += `</select>`;
 
-        if (LRR.isUserLogged() ) 
+        if (LRR.isUserLogged() && currentChapter.chapters === null ) // Only show edit/delete options for leaf chapters
             chapterOptions += `<a class="fas fa-pencil-alt edit-toc" href="#" style="padding:8px; font-size:14px" title="${I18N.ReaderEditToc}"/>
                             <a class="fas fa-trash-alt remove-toc" href="#" style="padding:8px; font-size:14px" title="${I18N.ReaderDeleteToc}"/>`;
 
@@ -1603,7 +1713,8 @@ function updateArchiveOverlay(forceUpdate = false) {
         const index = page - 1;
 
         const thumbCss = (localStorage.cropthumbs === "true") ? "id3" : "id3 nocrop";
-        const thumbnailUrl = new LRR.ApiURL(`/api/archives/${id}/thumbnail?page=${page}`);
+        const { arcId, localPage } = getArchiveForPage(page);
+        const thumbnailUrl = new LRR.ApiURL(`/api/archives/${arcId}/thumbnail?page=${localPage}`);
         
         let thumbnail = `
             <div class='${thumbCss} quick-thumbnail' page='${index}' style='display: inline-block; cursor: pointer'>
@@ -1634,15 +1745,19 @@ function updateArchiveOverlay(forceUpdate = false) {
 }
 
 function checkStampedPages() {
-    Server.callAPI(`/api/archives/${id}/stamps/`, "GET", null, I18N.ServerInfoError,
+    const { arcId, localPage } = getArchiveForPage(currentPage + 1);
+    Server.callAPI(`/api/archives/${arcId}/stamps/`, "GET", null, I18N.ServerInfoError,
         (data) => {
             $("#extract-spinner").hide();
+            cleanStampedPages();
             let pages = data.result.sort();
             let elements = $("div.id3.quick-thumbnail");
 
             for (let element of elements) {
                 let page = parseInt(element.getAttribute("page"));
-                if (pages.includes((page+1).toString())) {
+                const { _, localPage } = getArchiveForPage(page+1);
+
+                if (pages.includes((localPage).toString())) {
                     element.dataset.stamped = true;
                 }
             }
@@ -1650,19 +1765,29 @@ function checkStampedPages() {
     );
 }
 
+function cleanStampedPages() {
+    let elements = $("div.id3.quick-thumbnail[data-stamped=true]");
+
+    for (let element of elements) {
+        delete element.dataset.stamped;
+    }
+}
+
 function filterStampedOverlay() {
     let elements = $("div.id3.quick-thumbnail");
 
     if (overlayFiltered) {
         overlayFiltered = false;
+        $("#filter-stamped").removeClass("toggled");
         for (let element of elements) {
-            element.style.display = 'inline-block';
+            element.style.display = `inline-block`;
         }
     } else {
         overlayFiltered = true;
+        $("#filter-stamped").addClass("toggled");
         for (let element of elements) {
             if (!element.dataset.stamped) {
-                element.style.display = 'none';
+                element.style.display = `none`;
             }
         }
     }
@@ -1670,20 +1795,25 @@ function filterStampedOverlay() {
 
 function generateThumbnails() {
 
-    // Queue a single minion job for thumbnails and check on its progress regularly
+    // Function to evaluate Minion job progress and update thumbnails as they are generated
     const thumbProgress = function (notes) {
-        if (notes.total_pages === undefined) { return; }
+        if (notes.total_pages === undefined || notes.id === undefined) { return; }
 
         // Look at all the numbered keys in notes, aka notes.1, notes.2..
         for (let i = 1; i <= notes.total_pages; i++) {
             if (Object.hasOwn(notes, i) && notes[i] === "processed") {
-                const index = i - 1;
+
+                const startPage = id.startsWith("TANK_") ?
+                    content.chapters.find(ch => ch.arcId === notes.id).startPage :
+                    1;
+
+                const index = startPage + i - 2; // 0-based global
                 pageThumbnails.push(index);
 
                 // Live-update the page thumbnail in the overlay if it's visible
                 if ($(`#${index}_spinner`).attr("loaded") !== "true") {
                     // Set image source to the thumbnail
-                    const thumbnailUrl = new LRR.ApiURL(`/api/archives/${id}/thumbnail?page=${i}&cachebust=${Date.now()}`);
+                    const thumbnailUrl = new LRR.ApiURL(`/api/archives/${notes.id}/thumbnail?page=${i}&cachebust=${Date.now()}`);
                     $(`#${index}_thumb`).attr("src", thumbnailUrl);
                     $(`#${index}_spinner`).attr("loaded", true);
                     $(`#${index}_spinner`).hide();
@@ -1692,25 +1822,38 @@ function generateThumbnails() {
         }
     };
 
-    fetch(new LRR.ApiURL(`/api/archives/${id}/files/thumbnails`), { method: "POST" })
-        .then((response) => {
-            if (response.status === 200) {
-                // Thumbnails are already generated, there's nothing to do. Very nice!
-                pageThumbnails = [...Array(pages.length).keys()];
-                $(".ttspinner").hide();
-                return;
-            }
-            if (response.status === 202) {
-                // Check status and update progress
-                response.json().then((data) => Server.checkJobStatus(
-                    data.job,
-                    false,
-                    (data) => thumbProgress(data.notes), // call progress callback one last time to ensure all thumbs are loaded
-                    () => LRR.showErrorToast(I18N.ThumbJobError),
-                    thumbProgress,
-                ));
-            }
-        });
+    const fetchThumbsForArc = function(arc) {
+        fetch(new LRR.ApiURL(`/api/archives/${arc.id}/files/thumbnails`), { method: "POST" })
+            .then(response => {
+                if (response.status === 200) {
+                    // Thumbnails are already generated, there's nothing to do. Very nice!
+                    for (let idx = arc.startPage - 1; idx < arc.endPage; idx++) {
+                        pageThumbnails.push(idx);
+                    }
+                    $(".ttspinner").hide();
+                    return;
+                }
+                if (response.status === 202) {
+                    // Check status and update progress
+                    response.json().then((data) => Server.checkJobStatus(
+                        data.job,
+                        false,
+                        (data) => thumbProgress(data.notes), // call progress callback one last time to ensure all thumbs are loaded
+                        () => LRR.showErrorToast(I18N.ThumbJobError),
+                        thumbProgress,
+                    ));
+                }
+            });
+    };
+
+    if (id.startsWith("TANK_"))
+        content.chapters.forEach(arc => fetchThumbsForArc(arc)); // Generate thumbnails per archive
+    else
+        fetchThumbsForArc({
+            id: id,
+            startPage: 1,
+            endPage: content.pages,
+        }); // Queue a single minion job for thumbnails
 }
 
 /**
@@ -1798,7 +1941,7 @@ window.addEventListener("resize", () => {
 
 jQuery(() => {
     $.contextMenu({
-        selector: '.marker-context-menu',
+        selector: `.marker-context-menu`,
         build: ($trigger, e) => {
             e.preventDefault();
             e.stopPropagation();

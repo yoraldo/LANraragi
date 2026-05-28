@@ -662,10 +662,10 @@ export function addArchiveToSelection(data) {
     // Uses event delegation so it works even with virtual slides
     $(document).off(`click.msm-carousel-${id}`).on(`click.msm-carousel-${id}`, `#${id}.swiper-slide`, 
         function (e) {
-        if (!isMultiSelectMode) return;
-        e.preventDefault();
-        toggleArchiveSelection(id);
-    });
+            if (!isMultiSelectMode) return;
+            e.preventDefault();
+            toggleArchiveSelection(id);
+        });
 }
 
 /**
@@ -736,9 +736,9 @@ export function updateSelectionCount() {
         if (LRR.isUserLogged()) {
             $("#msm-batch-ops").show();
 
-            // Don't show merge option if more than 2 tanks are in the selection
+            // Don't show merge option if more than 1 tank is in the selection
             const tankCount = [...selectedArchives].filter((id) => id.startsWith("TANK_")).length;
-            if (tankCount <= 2)
+            if (tankCount < 2)
                 $("#msm-merge").show();
             else
                 $("#msm-merge").hide();
@@ -790,7 +790,18 @@ function mergeSelectionIntoTankoubon() {
 
     if (tankIds.length === 1) {
         // Fold non-tank archives into the existing tankoubon
-        addArchivesToTank(tankIds[0], archiveIds);
+        const tankId = tankIds[0];
+        Server.callAPI(`/api/tankoubons/${tankId}`, "GET", null, I18N.MSMMergeError, (data) => {
+            const tankName = data.result.name;
+            LRR.showPopUp({
+                text: I18N.MSMMergeExistingConfirmText(archiveIds.length, tankName),
+                showCancelButton: true,
+                reverseButtons: true,
+            }).then((result) => {
+                if (!result.isConfirmed) return;
+                addArchivesToTank(tankId, archiveIds);
+            });
+        });
     } else {
         // Prompt for a name and create a new tankoubon
         LRR.showPopUp({
@@ -954,8 +965,15 @@ export function migrateProgress() {
         const promises = [];
         localProgressKeys.forEach((id) => {
             const progress = localStorage.getItem(`${id}-reader`);
+            const metadataUrl = id.startsWith("TANK_") ? 
+                new LRR.ApiURL(`api/tankoubons/${id}`) : 
+                new LRR.ApiURL(`api/archives/${id}/metadata`);
 
-            promises.push(fetch(new LRR.ApiURL(`api/archives/${id}/metadata`), { method: "GET" })
+            const progressUrl = id.startsWith("TANK_") ? 
+                `api/tankoubons/${id}/progress/${progress}?force=1` : 
+                `api/archives/${id}/progress/${progress}?force=1`;
+
+            promises.push(fetch(metadataUrl), { method: "GET" })
                 .then((response) => response.json())
                 .then((data) => {
                     // Don't migrate if the server progress is already further
@@ -963,13 +981,13 @@ export function migrateProgress() {
                         && data !== undefined
                         && data !== null
                         && progress > data.progress) {
-                        Server.callAPI(`api/archives/${id}/progress/${progress}?force=1`, "PUT", null, I18N.LocalProgressionError, null);
+                        Server.callAPI(progressUrl, "PUT", null, I18N.LocalProgressionError, null);
                     }
 
                     // Clear out localStorage'd progress
                     localStorage.removeItem(`${id}-reader`);
                     localStorage.removeItem(`${id}-totalPages`);
-                }));
+                });
         });
 
         Promise.all(promises).then(() => LRR.toast({
@@ -1002,9 +1020,10 @@ export function handleContextMenu(option, id) {
         case "edit-tank":
             LRR.openInNewTab(new LRR.ApiURL(`/tankoubon?arcid=${id}`));
             break;
-        case "delete":
+        case "delete": {
+            const isTank = id.startsWith("TANK_");
             LRR.showPopUp({
-                text: I18N.ConfirmArchiveDeletion,
+                text: isTank ? I18N.ConfirmTankoubonDeletion : I18N.ConfirmArchiveDeletion,
                 icon: "warning",
                 showCancelButton: true,
                 focusConfirm: false,
@@ -1013,10 +1032,16 @@ export function handleContextMenu(option, id) {
                 confirmButtonColor: "#d33",
             }).then((result) => {
                 if (result.isConfirmed) {
-                    Server.deleteArchive(id, () => { document.location.reload(true); });
+                    if (isTank) Server.deleteTankoubon(id, () => {
+                        document.location.reload(true);
+                    });
+                    else Server.deleteArchive(id, () => {
+                        document.location.reload(true);
+                    });
                 }
             });
             break;
+        }
         case "read":
             LRR.openInNewTab(new LRR.ApiURL(`/reader?id=${id}`));
             break;
@@ -1076,7 +1101,7 @@ export function loadCategories() {
                             type='button' id='NEW_ONLY' value='🆕 ${I18N.NewArchives}' 
                             onclick='window.Index.toggleCategory(this)' title='${I18N.NewArchiveDesc}'/>
                         </div><div style='display:inline-block'>
-                            <input class='favtag-btn ${(("UNTAGGED_ONLY" === Index.selectedCategory) ? "toggled" : "")}' 
+                            <input class='favtag-btn ${(("UNTAGGED_ONLY" === window.Index.selectedCategory) ? "toggled" : "")}' 
                             type='button' id='UNTAGGED_ONLY' value='🏷️ ${I18N.UntaggedArchives}' 
                             onclick='window.Index.toggleCategory(this)' title='${I18N.UntaggedArcDesc}'/>
                         </div>`;

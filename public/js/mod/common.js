@@ -206,8 +206,8 @@ export function splitTagsByNamespace(tags) {
     }
 
     tags.split(/,\s?/).forEach((tag) => {
-        let nspce = null;
-        let val = null;
+        let nspce;
+        let val;
 
         // Split the tag from its namespace
         const arr = namespaceRegex.exec(tag);
@@ -328,8 +328,8 @@ export function buildThumbnailDiv(data, tagTooltip = true) {
     const bookmarkIcon = buildBookmarkIconElement(id, "thumbnail-bookmark-icon");
 
     const thumbSrc = id.startsWith("TANK_")
-            ? new ApiURL(`/api/tankoubons/${id}/thumbnail?no_fallback=true`)
-            : new ApiURL(`/api/archives/${id}/thumbnail?no_fallback=true`);
+        ? new ApiURL(`/api/tankoubons/${id}/thumbnail?no_fallback=true`)
+        : new ApiURL(`/api/archives/${id}/thumbnail?no_fallback=true`);
 
     // Don't enforce no_fallback=true here, we don't want those divs to trigger Minion jobs
     return `<div class="id1 context-menu swiper-slide" id="${id}">
@@ -405,15 +405,40 @@ export function buildPageCountDiv(arcdata) {
     return "";
 }
 
-export function buildChapterObject(toc, totalpages) {
+export function buildTankChapters(archiveData, pageOffset) {
+    const archiveChapter = {
+        id: archiveData.arcid,
+        chapters: [],
+        name: archiveData.title,
+        startPage: pageOffset + 1,
+        endPage: pageOffset + (archiveData.pagecount || 0)
+    };
+        
+    // If there's a ToC, recursively build sub-chapters
+    if (archiveData.toc && archiveData.toc.length > 0) {
+        archiveChapter.chapters = buildArchiveChapters(archiveData.toc, archiveData.arcid, archiveData.pagecount);
+        // Adjust sub-chapter page numbers to tank coordinates
+        archiveChapter.chapters.forEach(ch => {
+            ch.startPage += pageOffset;
+            ch.endPage += pageOffset;
+        });
+    }
+    
+    return [archiveChapter];
+}
+
+export function buildArchiveChapters(toc, id, totalpages) {
     const chapters = [];
-    if (toc.length === 0) {
+    
+    if (!toc || toc.length === 0) {
         return chapters;
     }
 
     if (toc[0].page > 1) {
         // Fill in gap before first chapter
         chapters.push({
+            id: id,
+            chapters: null,
             name: I18N.UntitledChapter,
             startPage: 1,
             endPage: toc[0].page - 1,
@@ -433,6 +458,8 @@ export function buildChapterObject(toc, totalpages) {
         }
 
         chapters.push({
+            id: id,
+            chapters: null,
             name: entry.name,
             startPage: entry.page,
             endPage: null, // to be filled in later
@@ -459,13 +486,9 @@ export function getProgress(arcdata) {
     const id = arcdata.arcid;
 
     const pagecount = parseInt(arcdata.pagecount || 0, 10);
-    let progress = -1;
-
-    if (isProgressLocal && !(isProgressAuthenticated && isUserLogged())) {
-        progress = parseInt(localStorage.getItem(`${id}-reader`) || 0, 10);
-    } else {
-        progress = parseInt(arcdata.progress || 0, 10);
-    }
+    let progress = (isProgressLocal && !(isProgressAuthenticated && isUserLogged()))
+        ? parseInt(localStorage.getItem(`${id}-reader`) || 0, 10)
+        : parseInt(arcdata.progress || 0, 10);
 
     return { progress, pagecount };
 }
