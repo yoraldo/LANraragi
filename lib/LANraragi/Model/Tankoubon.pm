@@ -20,7 +20,7 @@ use LANraragi::Utils::Database qw(invalidate_cache get_archive_json_multi get_ta
 use LANraragi::Utils::Generic  qw(array_difference filter_hash_by_keys render_api_response);
 use LANraragi::Utils::Logging  qw(get_logger);
 use LANraragi::Utils::Redis    qw(redis_decode redis_encode);
-use LANraragi::Utils::String   qw(trim);
+use LANraragi::Utils::String   qw(trim trim_CRLF);
 use LANraragi::Utils::Tags     qw(join_tags_to_string split_tags_to_array);
 
 my %TANK_METADATA = ( "name", 0, "summary", -1, "tags", -2, "progress", -3 );
@@ -43,7 +43,7 @@ sub get_tankoubon_list ( $page = 0 ) {
     # Jam tanks into an array of hashes
     my @result;
     foreach my $key ( sort @tanks ) {
-        my ( $total, $filtered, %data ) = get_tankoubon($key);
+        my %data = get_tankoubon($key);
         push( @result, \%data );
     }
 
@@ -98,6 +98,8 @@ sub create_tankoubon ( $name, $tank_id ) {
             $redis->zrem( $tank_id, $n );
         }
     }
+    # Encode name
+    $name = redis_encode( $name );
 
     # Add the tank name to LRR_TITLES so it shows up in tagless searches when tank grouping is enabled.
     # Title must be lowercased to match how search queries are processed.
@@ -106,7 +108,7 @@ sub create_tankoubon ( $name, $tank_id ) {
 
     # Default values for metadata
     # Score 0 is reserved for the name of the tank
-    $redis->zadd( $tank_id, $TANK_METADATA{"name"},     redis_encode("name_${name}") );
+    $redis->zadd( $tank_id, $TANK_METADATA{"name"},     "name_${name}" );
     $redis->zadd( $tank_id, $TANK_METADATA{"summary"},  "summary_" );
     $redis->zadd( $tank_id, $TANK_METADATA{"tags"},     "tags_" );
     $redis->zadd( $tank_id, $TANK_METADATA{"progress"}, "progress_0" );
@@ -121,13 +123,11 @@ sub create_tankoubon ( $name, $tank_id ) {
 # get_tankoubon(tankoubonid, fulldata, page)
 #   Returns the Tankoubon matching the given id.
 #   Returns undef if the id doesn't exist.
-sub get_tankoubon ( $tank_id, $fulldata = 0, $page = 0 ) {
+sub get_tankoubon ( $tank_id, $fulldata = 0, $page = -1 ) {
 
     my $logger      = get_logger( "Tankoubon", "lanraragi" );
     my $redis       = LANraragi::Model::Config->get_redis;
     my $keysperpage = LANraragi::Model::Config->get_pagesize;
-
-    $page //= 0;
 
     if ( $tank_id eq "" ) {
         $logger->debug("No Tankoubon ID provided.");
@@ -182,7 +182,11 @@ sub get_tankoubon ( $tank_id, $fulldata = 0, $page = 0 ) {
 
     my $total = $redis->zcount($tank_id, 1, "+inf");
 
-    return ( $total, $#archives + 1, %tank );
+    if ( $page < 0 ) {
+        return %tank;
+    } else {
+        return ( $total, $#archives + 1, %tank );
+    }
 }
 
 # delete_tankoubon(tankoubonid)
@@ -263,6 +267,25 @@ sub update_metadata ( $tank_id, $data ) {
 
     if ( $redis->exists($tank_id) ) {
         if ( defined $name ) {
+
+            # Keep the LRR_TITLES search index in sync with the rename, the same way
+            # Stats::build_stat_hashes normalizes tank titles when rebuilding the index.
+            # Without this, the tank stays searchable under its old name (until the next
+            # stats rebuild) and isn't searchable under its new one.
+            my $redis_search = LANraragi::Model::Config->get_redis_search;
+
+            my %old_meta = fetch_metadata_fields($tank_id);
+            my $old_name = $old_meta{name} // "";
+            if ( $old_name ne "" ) {
+                my $old_key = redis_encode( trim( lc($old_name) ) );
+                $redis_search->zrem( "LRR_TITLES", "$old_key\0$tank_id" );
+            }
+
+            my $new_key = redis_encode( trim( lc($name) ) );
+            $redis_search->zadd( "LRR_TITLES", 0, "$new_key\0$tank_id" );
+
+            $redis_search->quit;
+
             update_metadata_field( $tank_id, "name", $name );
         }
 

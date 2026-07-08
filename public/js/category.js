@@ -2,8 +2,8 @@
  * Category Operations
  */
 
-import * as LRR from "mod/common";
-import * as Server from "mod/server";
+import * as LRR from "./mod/common.js";
+import * as Server from "./mod/server.js";
 import I18N from "i18n";
 
 const Category = {};
@@ -14,7 +14,7 @@ export function initializeAll() {
 
     Server.loadBookmarkCategoryId().then(_ => {
         Category.loadCategories();
-    })
+    });
 
     // bind events to DOM
     $(document).on("change.category", "#category", Category.updateCategoryDetails);

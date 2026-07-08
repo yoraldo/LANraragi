@@ -1,8 +1,8 @@
 /**
  * Duplicate Operations
  */
-import * as LRR from "mod/common";
-import * as Server from "mod/server";
+import * as LRR from "./mod/common.js";
+import * as Server from "./mod/server.js";
 import I18N from "i18n";
 
 const Duplicates = {};
@@ -39,7 +39,7 @@ Duplicates.initializeAll = function () {
 
     $(document).on("change.duplicate-select-condition", ".duplicate-select-condition", Duplicates.conditionChange);
     Duplicates.initializeDataTable();
-}
+};
 
 /**
  * Sends a POST request to queue a find_duplicates job,
@@ -72,7 +72,7 @@ Duplicates.pollMinionJob = function (job) {
     Server.checkJobStatus(
         job,
         true,
-        (d) => {
+        () => {
             // Refresh the window so that the newly found duplicates are shown.
             // Make sure the URL doesn't contain delete=1 so we don't instantly delete them.
             if (window.location.href.includes("delete=1")) {
@@ -91,7 +91,7 @@ Duplicates.pollMinionJob = function (job) {
             LRR.showErrorToast(I18N.MinionCheckError, error);
         },
     );
-}
+};
 
 Duplicates.drawCallbackDataTable = function (settings) {
     var groupColumn = 0;
@@ -110,7 +110,7 @@ Duplicates.drawCallbackDataTable = function (settings) {
             }
             lastGroup = group;
         });
-}
+};
 
 Duplicates.initializeDataTable = function () {
 
@@ -182,7 +182,7 @@ Duplicates.compareDuplicates = function (rows, field, fieldType, order = "desc")
             row.find(".form-check-input").prop("checked", true);
         }
     });
-}
+};
 
 Duplicates.conditionChange = function (event) {
     var option = $(event.target).val();
@@ -233,7 +233,7 @@ Duplicates.deleteArchive = function (event) {
     }).then((result) => {
         if (result.isConfirmed) {
             let archiveId = $(event.currentTarget).attr("data-id");
-            Server.deleteArchive(archiveId, () => { Duplicates.dt.row($(event.currentTarget).parents("tr")).remove().draw() });
+            Server.deleteArchive(archiveId, () => { Duplicates.dt.row($(event.currentTarget).parents("tr")).remove().draw(); });
         }
     });
 };
@@ -255,7 +255,7 @@ Duplicates.deleteArchives = function () {
                 const dataId = row.find(".delete-archive").attr("data-id");
 
                 if (isChecked && dataId) {
-                    Server.deleteArchive(dataId, () => { Duplicates.dt.row(row).remove().draw() });
+                    Server.deleteArchive(dataId, () => { Duplicates.dt.row(row).remove().draw(); });
                 }
             });
         }

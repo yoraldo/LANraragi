@@ -1,11 +1,9 @@
 /**
  * Backup Operations
  */
-import * as Server from "mod/server";
-import * as LRR from "mod/common";
+import * as Server from "./mod/server.js";
+import * as LRR from "./mod/common.js";
 import I18N from "i18n";
-
-let currentJob = null;
 
 function initializeAll() {
     // bind events to DOM
@@ -18,7 +16,6 @@ function initializeAll() {
         dataType: "json",
         done(e, data) {
             if (data.result.success === 1) {
-                currentJob = data.result.job;
                 $("#processing").attr("style", "");
                 $("#processing-status").html(I18N.BackupRestoring);
                 $("#result").html("");
@@ -57,7 +54,6 @@ function startBackup() {
     return Server.callAPI("/api/database/backup", "POST", null, I18N.GenericReponseError,
         (data) => {
             if (data.success === 1) {
-                currentJob = data.job;
                 pollJob(data.job, true);
             } else {
                 $("#processing").attr("style", "display:none");

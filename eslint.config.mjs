@@ -2,6 +2,7 @@ import js from "@eslint/js";
 import { defineConfig, globalIgnores } from "eslint/config";
 import stylistic from "@stylistic/eslint-plugin";
 import globals from "globals";
+import importX from 'eslint-plugin-import-x';
 
 // Magical typing definition so rule intellisense works https://github.com/microsoft/vscode-eslint/issues/1122
 /**
@@ -12,6 +13,7 @@ const config = {
     plugins: {
         js,
         "@stylistic": stylistic,
+        'import-x': importX,
     },
     extends: ["js/recommended"],
 
@@ -34,7 +36,7 @@ const config = {
     rules: {
         "func-names": ["error", "never"],
         "no-alert": "off",
-        "no-console": "warn",
+        "no-console": "off",
         "no-else-return": "off",
         "no-implicit-globals": "error",
         "no-multi-assign": ["error", {
@@ -60,6 +62,16 @@ const config = {
             array: false,
         }],
 
+        "import-x/no-unresolved": [
+            "error",
+            {
+                ignore: [
+                    "i18n",
+                ]
+            }
+        ],
+
+        "@stylistic/semi": ["error", "always"],
         "@stylistic/indent": ["error", 4, { "SwitchCase": 1 }],
         "@stylistic/one-var-declaration-per-line": ["error", "initializations"],
         "@stylistic/quotes": ["error", "double", { "allowTemplateLiterals": true }],
@@ -67,6 +79,7 @@ const config = {
 };
 
 export default defineConfig([
+    importX.flatConfigs.recommended,
     globalIgnores(["public/js/vendor/*.js", "tests/samples/*"]),
     config,
 ]);

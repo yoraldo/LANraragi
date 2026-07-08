@@ -2,24 +2,21 @@
  * Non-DataTables Index functions.
  * (The split is there to permit easier switch if we ever yeet datatables from the main UI)
  */
-import * as LRR from "mod/common";
-import * as Server from "mod/server";
-import * as IndexTable from "mod/index_datatables";
+import * as LRR from "./common.js";
+import * as Server from "./server.js";
+import * as IndexTable from "./index_datatables.js";
 import I18N from "i18n";
 import * as marked from "marked";
 import DOMPurify from "dompurify";
 
-let selectedCategory = "";
-let awesomplete = {};
+export let selectedCategory = "";
 let carouselInitialized = false;
 let swiper = {};
 let serverVersion = "";
 let debugMode = false;
 export let pageSize = 100;
-let pseudoCopyBtn = undefined;
-let isMultiSelectMode = false;
+export let isMultiSelectMode = false;
 export let selectedArchives = new Set();
-let clipboard;
 
 /**
  * Initialize the Archive Index.
@@ -55,6 +52,11 @@ export function initializeAll() {
         e.stopImmediatePropagation();
         const id = $(this).closest("[id]").attr("id");
         if (id) toggleArchiveSelection(id);
+    });
+
+    // Mark carousel-originated reader links so Reader can decide whether to enable cross-archive navigation
+    $(document).on("click.carousel-navstate", ".swiper-wrapper .swiper-slide a[href*='/reader?id=']", () => {
+        sessionStorage.setItem("navigationState", "carousel");
     });
 
     // 0 = List view
@@ -174,6 +176,7 @@ export function initializeAll() {
                             click() {
                                 localStorage.hidecompleted = $(this).is(":checked");
                                 IndexTable.dataTable.draw();
+                                updateCarousel();
                             },
                         },
                     },
@@ -186,6 +189,7 @@ export function initializeAll() {
                             click() {
                                 localStorage.grouptanks = $(this).is(":checked");
                                 IndexTable.dataTable.draw();
+                                updateCarousel();
                             },
                         },
                     },
@@ -241,26 +245,6 @@ export function initializeAll() {
 
     updateTableHeaders();
     resizableColumns();
-
-    pseudoCopyBtn = $("#pseudo-copy-btn")
-    clipboard = new window.ClipboardJS("#pseudo-copy-btn");
-
-    clipboard.on("success", function (e) {
-        LRR.toast({
-            heading: I18N.IndexCopyLinkSuccess,
-            icon: "info",
-            hideAfter: 3000,
-        });
-        e.clearSelection();
-    });
-
-    clipboard.on("error", function (e) {
-        LRR.toast({
-            heading: I18N.IndexCopyLinkFail,
-            icon: "error",
-            hideAfter: false,
-        });
-    });
 }
 
 export function toggleOrder(e) {
@@ -289,7 +273,7 @@ export function bookmarkIconOff(arcid) {
     icons.forEach(el => {
         el.classList.remove("fas");
         el.classList.add("far");
-    })
+    });
 }
 
 // Turn bookmark icons to ON for all archives.
@@ -298,12 +282,12 @@ export function bookmarkIconOn(arcid) {
     icons.forEach(el => {
         el.classList.remove("far");
         el.classList.add("fas");
-    })
+    });
 }
 
 export function toggleBookmarkStatusByIcon(e) {
     const icon = e.currentTarget;
-    const id = icon.id;
+    const {id} = icon;
 
     if (!LRR.isUserLogged()) {
         LRR.toast({
@@ -354,12 +338,14 @@ export function loadTagSuggestions() {
             const namespacesSet = new Set(data.map((element) => (element.namespace === "parody" ? "series" : element.namespace)));
             namespacesSet.forEach((element) => {
                 if (element !== "") {
-                    $("#namespace-sortby").append(`<option value="${element}">${element.charAt(0).toUpperCase() + element.slice(1)}</option>`);
+                    const encodedNs = LRR.encodeHTML(element);
+                    const nsLabel = LRR.encodeHTML(element.charAt(0).toUpperCase() + element.slice(1));
+                    $("#namespace-sortby").append(`<option value="${encodedNs}">${nsLabel}</option>`);
                 }
             });
 
             // Setup awesomplete for the tag search bar
-            awesomplete = new Awesomplete("#search-input", {
+            new Awesomplete("#search-input", {
                 list: data,
                 data(tag) {
                     // Format tag objects from the API into a format awesomplete likes.
@@ -461,36 +447,41 @@ export function updateCarousel(e) {
     // Hit a different API endpoint depending on the requested localStorage carousel type
     let endpoint;
     const filter = IndexTable.currentSearch ? `&filter=${IndexTable.currentSearch}` : "";
-    const category = selectedCategory ? `&category=${selectedCategory}` : "";
+
+    // See LANraragi::Controller::Api::Search::handle_databases
+    const isBuiltinSelector = selectedCategory === "NEW_ONLY" || selectedCategory === "UNTAGGED_ONLY";
+    const category = (selectedCategory && !isBuiltinSelector) ? `&category=${selectedCategory}` : "";
+
+    // Mirror index setting toggles and special categories so carousels respect them too (when relevant)
+    const groupTanks = localStorage.grouptanks === "false" ? "&groupby_tanks=false" : "";
+    const hideCompleted = localStorage.hidecompleted === "true" ? "&hidecompleted=true" : "";
+    const newOnly = selectedCategory === "NEW_ONLY" ? "&newonly=true" : "";
+    const untaggedOnly = selectedCategory === "UNTAGGED_ONLY" ? "&untaggedonly=true" : "";
 
     switch (localStorage.carouselType) {
         case "random":
             $("#carousel-icon")[0].classList = "fas fa-random";
             $("#carousel-title").text(I18N.CarouselRandom);
-            endpoint = `/api/search/random?count=15${filter}${category}`;
-
-            // Special categories that imply additional query params
-            if (selectedCategory === "NEW_ONLY") {
-                endpoint += "&newonly=true";
-            } else if (selectedCategory === "UNTAGGED_ONLY") {
-                endpoint += "&untaggedonly=true";
-            }
+            endpoint = `/api/search/random?count=15${filter}${category}${groupTanks}${hideCompleted}${newOnly}${untaggedOnly}`;
 
             break;
         case "inbox":
             $("#carousel-icon")[0].classList = "fas fa-envelope-open-text";
             $("#carousel-title").text(I18N.NewArchives);
-            endpoint = `/api/search?newonly=true&sortby=date_added&order=desc&start=-1${filter}${category}`;
+            // newonly always true here by design
+            endpoint = `/api/search?newonly=true&sortby=date_added&order=desc&start=-1${filter}${category}${groupTanks}${hideCompleted}${untaggedOnly}`;
             break;
         case "untagged":
             $("#carousel-icon")[0].classList = "fas fa-edit";
             $("#carousel-title").text(I18N.UntaggedArchives);
-            endpoint = `/api/search?untaggedonly=true&sortby=date_added&order=desc&start=-1${filter}${category}`;
+            // untaggedonly always true here by design
+            endpoint = `/api/search?untaggedonly=true&sortby=date_added&order=desc&start=-1${filter}${category}${groupTanks}${hideCompleted}${newOnly}`;
             break;
         case "ondeck":
             $("#carousel-icon")[0].classList = "fas fa-book-reader";
             $("#carousel-title").text(I18N.CarouselOnDeck);
-            endpoint = `/api/search?sortby=lastread&hidecompleted=true${filter}`;
+            // hidecompleted always true here by design
+            endpoint = `/api/search?sortby=lastread&hidecompleted=true${filter}${groupTanks}${untaggedOnly}${newOnly}`;
             break;
         default:
             $("#carousel-icon")[0].classList = "fas fa-pastafarianism";
@@ -615,6 +606,9 @@ export function exitSelectionCarouselMode() {
     // Hide MSM controls
     $("#msm-carousel-controls").hide();
 
+    // Update msm flag
+    isMultiSelectMode = false;
+
     // Reload normal carousel content
     updateCarousel();
 
@@ -633,9 +627,11 @@ export function toggleArchiveSelection(id) {
         removeArchiveFromSelection(id);
     } else {
         selectedArchives.add(id);
-        // Find archive data from DataTables to build the carousel slide
+        // Find archive data from DataTables to build the carousel slide.
+        // If there's nothing in DT (because we're adding something from the current carousel instead),
+        // fallback to the shared data cache. 
         const row = IndexTable.dataTable.row(`#${id}`);
-        const data = row.data();
+        const data = row.data() || LRR.getArchiveData(id);
         if (data) {
             addArchiveToSelection(data);
         }
@@ -792,7 +788,7 @@ function mergeSelectionIntoTankoubon() {
         // Fold non-tank archives into the existing tankoubon
         const tankId = tankIds[0];
         Server.callAPI(`/api/tankoubons/${tankId}`, "GET", null, I18N.MSMMergeError, (data) => {
-            const tankName = data.result.name;
+            const tankName = data.name;
             LRR.showPopUp({
                 text: I18N.MSMMergeExistingConfirmText(archiveIds.length, tankName),
                 showCancelButton: true,
@@ -832,8 +828,7 @@ function mergeSelectionIntoTankoubon() {
 function addArchivesToTank(tankId, arcIds) {
     arcIds.reduce((chain, arcId) =>
         chain.then(() =>
-            Server.callAPI(`/api/tankoubons/${tankId}/${arcId}`, "PUT",
-                null, I18N.MSMMergeAddError, null)
+            Server.callAPISilent(`/api/tankoubons/${tankId}/${arcId}`, "PUT")
         ),
     Promise.resolve()
     ).then(() => {
@@ -842,7 +837,8 @@ function addArchivesToTank(tankId, arcIds) {
         clearSelection();
         exitSelectionCarouselMode();
         IndexTable.doSearch();
-    });
+    })
+        .catch((error) => LRR.showErrorToast(I18N.MSMMergeAddError, error));
 };
 
 // #endregion
@@ -964,23 +960,40 @@ export function migrateProgress() {
 
         const promises = [];
         localProgressKeys.forEach((id) => {
-            const progress = localStorage.getItem(`${id}-reader`);
-            const metadataUrl = id.startsWith("TANK_") ? 
+            const progress  = localStorage.getItem(`${id}-reader`);
+            const isTank    = id.startsWith("TANK_");
+
+            const metadataUrl = isTank ? 
                 new LRR.ApiURL(`api/tankoubons/${id}`) : 
                 new LRR.ApiURL(`api/archives/${id}/metadata`);
 
-            const progressUrl = id.startsWith("TANK_") ? 
+            const progressUrl = isTank ? 
                 `api/tankoubons/${id}/progress/${progress}?force=1` : 
                 `api/archives/${id}/progress/${progress}?force=1`;
 
-            promises.push(fetch(metadataUrl), { method: "GET" })
-                .then((response) => response.json())
+            const promise = fetch(metadataUrl, { method: "GET" })
+                .then((response) => {
+                    if (response.status === 404) {
+                        localStorage.removeItem(`${id}-reader`);
+                        localStorage.removeItem(`${id}-totalPages`);
+                        return null;
+                    }
+                    if (!response.ok) {
+                         
+                        console.warn(`Failed to migrate progress for ${id} (status ${response.status})`);
+                        return null;
+                    }
+                    return response.json();
+                })
                 .then((data) => {
+                    if (!data) return;
+
+                    const serverProgress = data.progress;
+
                     // Don't migrate if the server progress is already further
                     if (progress !== null
-                        && data !== undefined
-                        && data !== null
-                        && progress > data.progress) {
+                        && serverProgress !== undefined
+                        && progress > serverProgress) {
                         Server.callAPI(progressUrl, "PUT", null, I18N.LocalProgressionError, null);
                     }
 
@@ -988,6 +1001,7 @@ export function migrateProgress() {
                     localStorage.removeItem(`${id}-reader`);
                     localStorage.removeItem(`${id}-totalPages`);
                 });
+            promises.push(promise);
         });
 
         Promise.all(promises).then(() => LRR.toast({
@@ -997,67 +1011,8 @@ export function migrateProgress() {
             hideAfter: 13000,
         }));
     } else {
-        // eslint-disable-next-line no-console
+         
         console.log("No local reading progression to migrate");
-    }
-}
-
-// #endregion
-
-// #region Archive Context Menu
-
-/**
- * Handle context menu clicks.
- * @param {*} option The clicked option
- * @param {*} id The Archive ID
- * @returns
- */
-export function handleContextMenu(option, id) {
-    switch (option) {
-        case "edit":
-            LRR.openInNewTab(new LRR.ApiURL(`/edit?id=${id}`));
-            break;
-        case "edit-tank":
-            LRR.openInNewTab(new LRR.ApiURL(`/tankoubon?arcid=${id}`));
-            break;
-        case "delete": {
-            const isTank = id.startsWith("TANK_");
-            LRR.showPopUp({
-                text: isTank ? I18N.ConfirmTankoubonDeletion : I18N.ConfirmArchiveDeletion,
-                icon: "warning",
-                showCancelButton: true,
-                focusConfirm: false,
-                confirmButtonText: I18N.ConfirmYes,
-                reverseButtons: true,
-                confirmButtonColor: "#d33",
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    if (isTank) Server.deleteTankoubon(id, () => {
-                        document.location.reload(true);
-                    });
-                    else Server.deleteArchive(id, () => {
-                        document.location.reload(true);
-                    });
-                }
-            });
-            break;
-        }
-        case "read":
-            LRR.openInNewTab(new LRR.ApiURL(`/reader?id=${id}`));
-            break;
-        case "download":
-            LRR.openInNewTab(new LRR.ApiURL(`/api/archives/${id}/download`));
-            break;
-        case "copy link":
-            pseudoCopyBtn.attr("data-clipboard-text", `${window.location.origin}${new LRR.ApiURL(`/reader?id=${id}`).toString()}`);
-            pseudoCopyBtn.click()
-            break;
-        case "msm-toggle-archive":
-            if (!isMultiSelectMode) toggleMultiSelectMode();
-            toggleArchiveSelection(id);
-            break;
-        default:
-            break;
     }
 }
 

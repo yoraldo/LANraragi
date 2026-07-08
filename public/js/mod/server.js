@@ -1,7 +1,7 @@
 /**
  * Functions for Generic API calls.
  */
-import * as LRR from "mod/common";
+import * as LRR from "./common.js";
 import I18N from "i18n";
 
 let isScriptRunning = false;
@@ -21,32 +21,75 @@ export function callAPI(endpoint, method, successMessage, errorMessage, successC
     return fetch(endpointUrl, { method })
         .then((response) => response.json())
         .then((data) => {
-            if (Object.prototype.hasOwnProperty.call(data, "success") && !data.success) {
-                throw new Error(data.error);
-            } else {
-                let message = successMessage;
-                if ("successMessage" in data && data.successMessage) {
-                    message = data.successMessage;
-                }
-                if (message !== null) {
-                    LRR.toast({
-                        heading: message,
-                        icon: "success",
-                        hideAfter: 7000,
-                    });
-                }
 
-                if (successCallback !== null) return successCallback(data);
-
-                return null;
+            // Handle OpenAPI-style error messages (HTTP status code + message)
+            if (Object.hasOwn(data, "errors")) {
+                throw new Error(data.errors[0].message);
             }
+            else // Handle LRR API-style error messages (success=0 + error string)
+                if (Object.hasOwn(data, "success") && !data.success) {
+                    throw new Error(data.error);
+                } else {
+                    let message = successMessage;
+                    if ("successMessage" in data && data.successMessage) {
+                        message = data.successMessage;
+                    }
+                    if (message !== null) {
+                        LRR.toast({
+                            heading: message,
+                            icon: "success",
+                            hideAfter: 7000,
+                        });
+                    }
+
+                    if (successCallback !== null) return successCallback(data);
+
+                    return null;
+                }
         })
         .catch((error) => LRR.showErrorToast(errorMessage, error));
 }
 
-export function callAPIBody(endpoint, method, body, successMessage, errorMessage, successCallback) {
+/**
+ * Silent version of callAPI that doesn't show any toasts, popups, or catches errors.
+ * Returns the promise so you can chain/try-catch yourself. 
+ * @param {*} endpoint 
+ * @param {*} method 
+ * @returns The data from the API call. If any error occurs, this will throw. 
+ */
+export function callAPISilent(endpoint, method) {
     let endpointUrl = new LRR.ApiURL(endpoint);
-    return fetch(endpointUrl, { method, body })
+    return fetch(endpointUrl, { method })
+        .then((response) => response.json())
+        .then((data) => {
+            // Handle OpenAPI-style error messages (HTTP status code + message)
+            if (Object.hasOwn(data, "errors")) {
+                throw new Error(data.errors[0].message);
+            }
+            else // Handle LRR API-style error messages (success=0 + error string)
+                if (Object.hasOwn(data, "success") && !data.success) {
+                    throw new Error(data.error);
+                } else {
+                    return data;
+                }
+        });
+}
+
+/**
+ *
+ * @param {*} endpoint URL endpoint
+ * @param {*} method GET/PUT/DELETE/POST
+ * @param {*} body Request body
+ * @param {*} successMessage Message written in the toast if request succeeded (success = 1)
+ * @param {*} errorMessage Header of the error message if request fails (success = 0)
+ * @param {*} successCallback called if request succeeded
+ * @param {*} contentType content type
+ * @returns The result of the callback, or NULL.
+ */
+export function callAPIBody(endpoint, method, body, successMessage, errorMessage, successCallback, contentType = null) {
+    let endpointUrl = new LRR.ApiURL(endpoint);
+    const headers = contentType ? { "Content-Type": contentType } : undefined;
+    return fetch(endpointUrl, { method, body, headers })
         .then((response) => response.json())
         .then((data) => {
             if (Object.prototype.hasOwnProperty.call(data, "success") && !data.success) {
@@ -172,7 +215,7 @@ export function triggerScript(namespace) {
                         if (d.result.success === 1) {
                             LRR.toast({
                                 heading: I18N.ScriptResult,
-                                text: `<pre>${JSON.stringify(d.result.data, null, 4)}</pre>`,
+                                text: `<pre>${LRR.encodeHTML(JSON.stringify(d.result.data, null, 4))}</pre>`,
                                 icon: "info",
                                 hideAfter: 10000,
                                 closeOnClick: false,
@@ -267,7 +310,7 @@ export function regenerateThumbnails(force) {
                     $("#forcethumb-button").prop("disabled", false);
                     LRR.toast({
                         heading: I18N.RegenThumbnailSuccess,
-                        text: d.result.errors,
+                        text: LRR.encodeHTML(`${d.result.errors}`),
                         icon: "success",
                         hideAfter: 15000,
                         closeOnClick: false,
@@ -317,7 +360,7 @@ export function deleteArchive(arcId, callback) {
             } else {
                 LRR.toast({
                     heading: I18N.ArchiveDeleted,
-                    text: data.filename,
+                    text: LRR.encodeHTML(data.filename),
                     icon: "success",
                     hideAfter: 7000,
                 });
@@ -347,6 +390,18 @@ export function updateTagsFromArchive(arcId, tags) {
     formData.append("tags", tags);
 
     return callAPIBody(`/api/archives/${arcId}/metadata`, "PUT", formData, I18N.EditMetadataSaved, I18N.EditMetadataError, null);
+}
+
+/**
+ * Sends a UPDATE request for the additional tags of the Tankoubon ID
+ * @param {string} tankId Tankoubon ID
+ * @param {string|string[]} tags Comma-separated tag list (or array of tags) to replace the Tankoubon's current tags with
+ */
+export function updateTagsFromTankoubon(tankId, tags) {
+    const tagString = Array.isArray(tags) ? tags.join(",") : tags;
+
+    return callAPIBody(`/api/tankoubons/${tankId}`, "PUT", JSON.stringify({ metadata: { tags: tagString } }),
+        I18N.EditMetadataSaved, I18N.TankoubonEditError, null, "application/json");
 }
 
 /**

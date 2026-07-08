@@ -1,3 +1,4 @@
+---
 openapi: 3.1.0
 info:
   version: 0.9.6
@@ -1227,8 +1228,13 @@ paths:
           description: ID of the Archive to process.
           schema:
             type: string
-            minLength: 40
-            maxLength: 40
+            oneOf:
+              - minLength: 40
+                maxLength: 40
+                pattern: "^[0-9a-f]{40}$"
+              - minLength: 15
+                maxLength: 15
+                pattern: "^TANK_[0-9]{10}$"
       responses:
         '200':
           description: Archive categories
@@ -1855,7 +1861,7 @@ paths:
     get:
       operationId: stampedPages
       x-mojo-to: api-stamp#get_stamped_pages
-      summary: 🔑 Get pages that contain at least one stamp in the archive
+      summary: Get pages that contain at least one stamp in the archive
       description: Get pages that contain at least one stamp in the archive.
       tags:
         - stamps
@@ -1883,7 +1889,7 @@ paths:
     get:
       operationId: stampsByPage
       x-mojo-to: api-stamp#get_stamps_by_page
-      summary: 🔑 Get the stamps linked to the page
+      summary: Get the stamps linked to the page
       description: Get the stamps linked to the page.
       tags:
         - stamps
@@ -2146,6 +2152,122 @@ paths:
                   recordsTotal: 2
         '204':
           description: Search engine is not initialized yet. Please wait a few seconds.
+  /search/ids:
+    get:
+      operationId: searchArchiveIds
+      x-mojo-to: api-search#handle_api_ids
+      summary: Search Archive IDs
+      description: >-
+        Search for Archives like `/api/search`, but returns only the ordered
+        list of matching Archive IDs without the accompanying metadata.
+      tags:
+        - search
+      parameters:
+        - name: category
+          in: query
+          required: false
+          description: ID of the category you want to restrict this search to.
+          schema:
+            type: string
+            minLength: 14
+            maxLength: 14
+        - name: filter
+          in: query
+          required: false
+          description: Search query. This follows the same rules as the queries in `/api/search`.
+          schema:
+            type: string
+        - name: start
+          in: query
+          required: false
+          description: >-
+            From which archive in the total result count this enumeration should
+            start. The total number of archives displayed depends on the
+            server-side page size preference.
+
+
+            From 0.8.2 onwards, you can use "-1" here to get the full, unpaged list of IDs.
+          schema:
+            type: integer
+        - name: sortby
+          in: query
+          required: false
+          description: >-
+            Namespace by which you want to sort the results. There are specific
+            sort keys you can use:
+
+            - *title* if you want to sort by title
+
+            - *lastread* if you want to sort by last read time. (If
+            **Server-side Progress Tracking** is enabled)
+
+
+            (Default value is title. If you sort by lastread, IDs that have
+            never been read will be removed from the search.)
+          schema:
+            type: string
+        - name: order
+          in: query
+          required: false
+          description: Order of the sort, either `asc` or `desc`.
+          schema:
+            type: string
+        - name: newonly
+          in: query
+          required: false
+          description: Limit search to new archives only.
+          schema:
+            type: boolean
+        - name: untaggedonly
+          in: query
+          required: false
+          description: Limit search to untagged archives only.
+          schema:
+            type: boolean
+        - name: hidecompleted
+          in: query
+          required: false
+          description: Hide archives where reading progress has reached the end.
+          schema:
+            type: boolean
+        - name: groupby_tanks
+          in: query
+          required: false
+          description: >-
+            Enable or disable Tankoubon grouping. Defaults to true.
+
+            When enabled, Tankoubons will show in search results, replacing all
+            the archive IDs they contain.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    description: Archive IDs for each search result
+                    items:
+                      type: string
+                  recordsFiltered:
+                    type: integer
+                    description: Amount of archives in the search result
+                  recordsTotal:
+                    type: integer
+                    description: Total number of archives available. This result will change depending on the `groupby_tanks` parameter.
+                example:
+                  data:
+                    - 28697b96f0ac5858be2614ed10ca47742c9522fd
+                    - 5cf64ec2f3c2c627fb8a64df198af2a8527c4fdb
+                  recordsFiltered: 2
+                  recordsTotal: 2
+        '204':
+          description: Search engine is not initialized yet. Please wait a few seconds.
   /search/random:
     get:
       operationId: searchRandomArchives
@@ -2226,18 +2348,18 @@ paths:
                   recordsTotal:
                     type: integer
               example:
-                  data:
-                    - arcid: 28697b96f0ac5858be2614ed10ca47742c9522fd
-                      isnew: false
-                      extension: rar
-                      pagecount: 34
-                      progress: 3
-                      tags: parody:jojo's bizarre adventure
-                      lastreadtime: 1337038281
-                      title: Rohan Kishibe goes to Gucci
-                      filename: Gucc
-                      summary: cool summary
-                  recordsTotal: 2
+                data:
+                  - arcid: 28697b96f0ac5858be2614ed10ca47742c9522fd
+                    isnew: false
+                    extension: rar
+                    pagecount: 34
+                    progress: 3
+                    tags: parody:jojo's bizarre adventure
+                    lastreadtime: 1337038281
+                    title: Rohan Kishibe goes to Gucci
+                    filename: Gucc
+                    summary: cool summary
+                recordsTotal: 2
   /search/cache:
     delete:
       security:
@@ -2299,7 +2421,7 @@ paths:
                 items:
                   type: object
                   required:
-                      - text
+                    - text
                   properties:
                     namespace:
                       type: [string, "null"]
@@ -2359,7 +2481,7 @@ paths:
                     type: array
                     description: Array of tankoubon metadata
                     items:
-                      $ref: '#/components/schemas/TankoubonMetadataJson'
+                      $ref: '#/components/schemas/TankoubonBackupJson'
                 example:
                   archives:
                     - arcid: 28697b96f0ac5858be2614ed10ca47742c9522fd
@@ -2793,30 +2915,30 @@ paths:
               schema:
                 type: object
                 example:
-                    args: [/tmp/QF3UCnKdMr/myfile.zip]
-                    attempts: 1
-                    children: []
-                    created: 1601145004
-                    delayed: 1601145004
-                    expires: null
-                    finished: 1601145004
-                    id: 7
-                    lax: 0
-                    notes: {}
-                    parents: []
-                    priority: 0
-                    queue: default
-                    result: 
-                      id: 75d18ce470dc99f83dc355bdad66319d1f33c82b
-                      message: This file already exists in the Library.
-                      success: 0
-                    retried: null
-                    retries: 0
-                    started: 1601145004
-                    state: finished
-                    task: handle_upload
-                    time: 1601145005
-                    worker: 1
+                  args: [/tmp/QF3UCnKdMr/myfile.zip]
+                  attempts: 1
+                  children: []
+                  created: 1601145004
+                  delayed: 1601145004
+                  expires: null
+                  finished: 1601145004
+                  id: 7
+                  lax: 0
+                  notes: {}
+                  parents: []
+                  priority: 0
+                  queue: default
+                  result:
+                    id: 75d18ce470dc99f83dc355bdad66319d1f33c82b
+                    message: This file already exists in the Library.
+                    success: 0
+                  retried: null
+                  retries: 0
+                  started: 1601145004
+                  state: finished
+                  task: handle_upload
+                  time: 1601145005
+                  worker: 1
   /minion/{jobname}/queue:
     post:
       security:
@@ -3373,36 +3495,20 @@ paths:
                 $ref: '#/components/schemas/OperationResponse'
   /tankoubons/{id}:
     parameters:
-        - name: id
-          in: path
-          required: true
-          description: ID of the Tankoubon desired
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        description: ID of the Tankoubon desired
+        schema:
+          type: string
     get:
       operationId: getTankoubon
       x-mojo-to: api-tankoubon#get_tankoubon
       summary: Get a single Tankoubon
       description: >-
-        Get the details of the specified tankoubon ID, with the archives list paginated.  
-
-        The amount of archives per page depends on the server `archives_per_page` setting.
+         Get the details of the specified tankoubon ID.
       tags:
         - tankoubons
-      parameters:
-        - name: include_full_data
-          in: query
-          required: false
-          description: If set to true, a `full_data` array will be added to the response with full Archive metadata.
-          schema:
-            type: boolean
-        - name: page
-          in: query
-          required: false
-          description: Page of the Archives list. You can use -1 to return all archives if needed.  
-          schema:
-            type: integer
-            default: 0
       responses:
         '200':
           description: Tankoubon
@@ -3411,32 +3517,32 @@ paths:
               schema:
                 type: object
                 properties:
-                  result:
-                    type: object
-                    properties:
-                      archives:
-                        type: array
-                        description: Paginated list of archive IDs or tankoubon IDs.
-                        items:
-                          type: string
-                          oneOf:
-                            - minLength: 40
-                              maxLength: 40
-                              pattern: "^[0-9a-f]{40}$"
-                            - minLength: 15
-                              maxLength: 15
-                              pattern: "^TANK_[0-9]{10}$"
-                        uniqueItems: true
-                      full_data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ArchiveMetadataJson'
-                  total:
+                  id:
+                    type: string
+                    description: ID of this Tankoubon.
+                  name:
+                    type: string
+                    description: Name of this Tankoubon.
+                  summary:
+                    type: string
+                  tags:
+                    type: string
+                  archives:
+                    type: array
+                    description: Full list of archive IDs contained in this Tankoubon.
+                    items:
+                      type: string
+                      oneOf:
+                        - minLength: 40
+                          maxLength: 40
+                          pattern: "^[0-9a-f]{40}$"
+                        - minLength: 15
+                          maxLength: 15
+                          pattern: "^TANK_[0-9]{10}$"
+                    uniqueItems: true
+                  progress:
                     type: integer
-                    description: The total amount of archives in this Tankoubon.
-                  filtered:
-                    type: integer
-                    description: The amount of archives in the current page.
+                    description: Reading progress (page number) for this Tankoubon.
         '400':
           description: Error response
           content:
@@ -3543,14 +3649,93 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationResponse'
+  /tankoubons/{id}/full:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: ID of the Tankoubon desired
+        schema:
+          type: string
+    get:
+      operationId: getTankoubonFull
+      x-mojo-to: api-tankoubon#get_tankoubon_full
+      summary: Get a single Tankoubon with full detail
+      description: >-
+        Get the details of the specified tankoubon ID with paginated archive metadata.
+
+        The amount of archives per page depends on the server `archives_per_page` setting.
+      tags:
+        - tankoubons
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page of the Archives list. Defaults to -1, which returns all archives.
+          schema:
+            type: integer
+            default: -1
+      responses:
+        '200':
+          description: Tankoubon
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        description: ID of this Tankoubon.
+                      name:
+                        type: string
+                        description: Name of this Tankoubon.
+                      summary:
+                        type: string
+                      tags:
+                        type: string
+                      progress:
+                        type: integer
+                        description: Reading progress (page number) for this Tankoubon.
+                      archives:
+                        type: array
+                        description: Paginated list of archive IDs contained in this Tankoubon.
+                        items:
+                          type: string
+                          oneOf:
+                            - minLength: 40
+                              maxLength: 40
+                              pattern: "^[0-9a-f]{40}$"
+                            - minLength: 15
+                              maxLength: 15
+                              pattern: "^TANK_[0-9]{10}$"
+                        uniqueItems: true
+                      full_data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ArchiveMetadataJson'
+                  total:
+                    type: integer
+                    description: The total amount of archives in this Tankoubon.
+                  filtered:
+                    type: integer
+                    description: The amount of archives in the current page.
+        '400':
+          description: Error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
   /tankoubons/{id}/thumbnail:
     parameters:
-        - name: id
-          in: path
-          required: true
-          description: ID of the Tankoubon desired
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        description: ID of the Tankoubon desired
+        schema:
+          type: string
     get:
       operationId: getTankoubonThumbnail
       x-mojo-to: api-tankoubon#serve_tankoubon_thumbnail
@@ -4041,10 +4226,10 @@ components:
           type: string
           description: Type of the plugin
           enum:
-              - download
-              - login
-              - metadata
-              - script
+            - download
+            - login
+            - metadata
+            - script
         namespace:
           type: string
           description: Unique namespace for the plugin
@@ -4075,10 +4260,10 @@ components:
         version: 2.1
         parameters: 
           - desc: ipb_pass_hash cookie
-            type:	string
+            type: string
           - default_value: 0
-            desc:	Force resampled archive download
-            name:	forceresampled
+            desc: Force resampled archive download
+            name: forceresampled
             type: bool
     PluginParameter:
       type: object
@@ -4094,16 +4279,16 @@ components:
           type: string
           description: Type of the parameter. This isn't really checked server-side and is used to inform the config page for the plugin.
           enum:
-              - bool
-              - int
-              - string
+            - bool
+            - int
+            - string
         default_value:
           type: [string, "null"]
           description: Default value of the parameter
       example:
         default_value: 0
-        desc:	Force resampled archive download
-        name:	forceresampled
+        desc: Force resampled archive download
+        name: forceresampled
         type: bool
     OperationResponse:
       type: object
@@ -4238,8 +4423,13 @@ components:
           description: Array of archive IDs (if this is a static category, empty otherwise)
           items:
             type: string
-            minLength: 40
-            maxLength: 40
+            oneOf:
+              - minLength: 40
+                maxLength: 40
+                pattern: "^[0-9a-f]{40}$"
+              - minLength: 15
+                maxLength: 15
+                pattern: "^TANK_[0-9]{10}$"
         id:
           type: string
           description: ID of the category
@@ -4267,10 +4457,22 @@ components:
           - 7f03b8b1f337e1e42b2c2890533c0de7479d41ca
     TankoubonMetadataJson:
       type: object
-      description: Tankoubon metadata
+      description: Tankoubon metadata as returned by the list endpoint
       required:
-        - tankid
+        - id
       properties:
+        id:
+          type: string
+          description: ID of the tankoubon
+        name:
+          type: string
+          description: Name of the tankoubon
+        summary:
+          type: string
+          description: Summary of the tankoubon
+        tags:
+          type: string
+          description: Tags associated with the tankoubon
         archives:
           type: array
           description: Array of archive IDs
@@ -4278,12 +4480,43 @@ components:
             type: string
             minLength: 40
             maxLength: 40
+        progress:
+          type: integer
+          description: Reading progress (page number) for this Tankoubon
+      example:
+        id: TANK_1749925516
+        name: sailor moon
+        summary: ""
+        tags: ""
+        archives:
+          - e69e43e1355267f7d32a4f9b7f2fe108d2401ebf
+          - e69e43e1355267f7d32a4f9b7f2fe108d2401ebg
+        progress: 0
+    TankoubonBackupJson:
+      type: object
+      description: Tankoubon metadata as returned in a backup
+      required:
+        - tankid
+      properties:
         tankid:
           type: string
           description: ID of the tankoubon
         name:
           type: string
           description: Name of the tankoubon
+        summary:
+          type: string
+          description: Summary of the tankoubon
+        tags:
+          type: string
+          description: Tags associated with the tankoubon
+        archives:
+          type: array
+          description: Array of archive IDs
+          items:
+            type: string
+            minLength: 40
+            maxLength: 40
       example:
         tankid: TANK_1749925516
         name: sailor moon

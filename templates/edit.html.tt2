@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<title>[% title %] - [% c.lh("Editing [_1]", arctitle) %]</title>
+	<title>[% title %] - [% c.lh("Editing [_1]", arctitle) | html %]</title>
 
 	<meta name="viewport" content="width=device-width" />
 	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
@@ -32,7 +32,7 @@
 	<script src="[% c.url_for("/js/edit.js?$version") %]" type="module"></script>
 
 	<script type="module">
-		import * as IndexTable from "mod/index_datatables";
+		import * as IndexTable from "[% c.url_for("/js/$version/mod/index_datatables.js") %]";
 
 		jQuery(() => {
 			window.IndexTable = IndexTable;
@@ -46,11 +46,11 @@
 	<div class='ido' style='text-align:center'>
 
 		[% IF is_tank %]
-		<h2 class='ih' style='text-align:center'>[% c.lh("Editing [_1] (Tankoubon)", arctitle) %]</h2>
+		<h2 class='ih' style='text-align:center'>[% c.lh("Editing [_1] (Tankoubon)", arctitle) | html %]</h2>
 		[% ELSIF artist %]
-		<h2 class='ih' style='text-align:center'>[% c.lh("Editing [_1] by [_2]", arctitle, artist) %]</h2>
+		<h2 class='ih' style='text-align:center'>[% c.lh("Editing [_1] by [_2]", arctitle, artist) | html %]</h2>
 		[% ELSE %]
-		<h2 class='ih' style='text-align:center'>[% c.lh("Editing [_1]", arctitle) %]</h2>
+		<h2 class='ih' style='text-align:center'>[% c.lh("Editing [_1]", arctitle) | html %]</h2>
 		[% END %]
 
 		<form name='editArchiveForm' id='editArchiveForm' enctype='multipart/form-data' method='post' autocomplete="off"
@@ -62,7 +62,7 @@
 						<td style='text-align:left; width:100px'>[% c.lh("Current File Name:") %]</td>
 						<td>
 							<input class='stdinput edit-mode-stdinput' type='text' readonly='' size='20'
-								value="[% file %]" name='filename'>
+								value="[% file | html %]" name='filename'>
 						</td>
 					</tr>
 					[% END %]
@@ -79,7 +79,7 @@
 						<td style='text-align:left; width:100px'>[% c.lh("Title:") %]</td>
 						<td>
 							<input id='title' class='stdinput edit-mode-stdinput' type='text' maxlength='255' size='20'
-								value="[% arctitle %]" name='title'>
+								value="[% arctitle | html %]" name='title'>
 						</td>
 					</tr>
 
@@ -87,7 +87,7 @@
 						<td style='text-align:left; width:100px'>[% c.lh("Summary:") %]</td>
 						<td>
 							<textarea id='summary' class='stdinput edit-mode-stdinput' type='text'
-								style="min-height:72px;" name='summary'>[% summary %]</textarea>
+								style="min-height:72px;" name='summary'>[% summary | html %]</textarea>
 						</td>
 					</tr>
 
@@ -97,7 +97,7 @@
 						</td>
 						<td>
 							<textarea id='tagText' class='stdinput' name='tags' autocomplete="off"
-								style="min-height:125px; width:96%">[% tags %]</textarea>
+								style="min-height:125px; width:96%">[% tags | html %]</textarea>
 							<i class='fa fa-5x fa-compact-disc fa-spin'
 								style=' color:black; position:absolute; top:45%; left:52%; display:none'
 								id='tag-spinner'></i>
@@ -145,12 +145,15 @@
 								<li data-id="[% archive.arcid %]">
 									<i class="fas fa-grip-vertical drag-handle"></i>
 									<span class="arc-title" onmouseover="IndexTable.buildImageTooltip(this)">
-										[% archive.title %]
+										[% archive.title | html %]
 									</span>
 									<div class="caption" style="display: none;">
 										<img style="height:300px" src='[% c.url_for("/api/archives/$archive.arcid/thumbnail") %]'
 											onerror="this.src=`new LRR.ApiURL('/img/noThumb.png')`">
 									</div>
+									<a class="edit-archive-link" title="[% c.lh("Edit Archive Metadata") %]" href="[% c.url_for("/edit").query("id=$archive.arcid") %]" target="_blank" rel="noopener">
+										<i class="fas fa-pencil-alt"></i>
+									</a>
 									<a class="remove-archive" title="[% c.lh("Remove from Tankoubon") %]">	
 										<i class="fas fa-close" style="text-align:right;"></i>
 									</a>

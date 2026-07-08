@@ -1,8 +1,8 @@
 /**
  * Batch Operations
  */
-import * as LRR from "mod/common";
-import * as Server from "mod/server";
+import * as LRR from "./mod/common.js";
+import * as Server from "./mod/server.js";
 import I18N from "i18n";
 
 const Batch = {};
@@ -87,8 +87,8 @@ Batch.loadSelectionOnly = function (ids) {
 
     // Acquire archive IDs from Tanks and merge with directly selected archive IDs, then fetch metadata for each archive ID
     const tankFetches = tankIds.map((id) => 
-        Server.callAPI(`/api/tankoubons/${id}?page=-1`, "GET", null, I18N.ArchiveListLoadFailure, (data) => {
-            archiveIds.push(...(data.result.archives || []));
+        Server.callAPI(`/api/tankoubons/${id}`, "GET", null, I18N.ArchiveListLoadFailure, (data) => {
+            archiveIds.push(...(data.archives || []));
         }));
         
     Promise.all(tankFetches).then(() => {
@@ -254,7 +254,7 @@ Batch.startBatch = function () {
     Batch.socket.onopen = function () {
         const command = commandBase;
         command.archive = arcs.splice(0, 1)[0];
-        // eslint-disable-next-line no-console
+         
         console.log(command);
         Batch.socket.send(JSON.stringify(command));
     };
@@ -277,7 +277,7 @@ Batch.startBatch = function () {
         setTimeout(() => {
             const command = commandBase;
             command.archive = arcs.splice(0, 1)[0];
-            // eslint-disable-next-line no-console
+             
             console.log(command);
             Batch.socket.send(JSON.stringify(command));
         }, timeout * 1000);

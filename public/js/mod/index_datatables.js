@@ -1,14 +1,14 @@
 /**
  * All the Archive Index functions related to DataTables.
  */
-import * as LRR from "mod/common";
-import * as Index from "mod/index";
+import * as LRR from "./common.js";
+import * as Index from "./index.js";
 import I18N from "i18n";
 
 export let dataTable = {};
 let originalTitle = document.title;
 let isComingFromPopstate = false;
-let currentSearch = "";
+export let currentSearch = "";
 
 /**
  * Initialize DataTables.
@@ -29,9 +29,19 @@ export function initializeAll() {
 
     // Catch tag div clicks and do a search instead of reloading the page
     $(document).on("click.gt", ".gt", (e) => {
-        e.preventDefault();
-        currentSearch = $(e.target).attr("search");
-        doSearch();
+
+        if (e.target.hasAttribute("search")) {
+            e.preventDefault();
+            currentSearch = $(e.target).attr("search");
+            doSearch();
+        }
+    });
+
+    // Mark datatables-originated reader links so Reader can decide whether to enable cross-archive navigation.
+    // Excludes anything inside the carousel; that's tagged separately in ContextMenu.initializeAll.
+    $(document).on("click.datatables-navstate", "a[href*='/reader?id=']", function () {
+        if ($(this).closest(".swiper-wrapper").length > 0) return;
+        sessionStorage.setItem("navigationState", "datatables");
     });
 
     // Add a listen event to window.popstate to update the search accordingly
@@ -66,6 +76,9 @@ export function initializeAll() {
     columns.push({
         data: "tags", className: "tags itd", name: "tags", orderable: false, render: renderTags,
     });
+
+    // Store the page size in localStorage for use in the reader
+    localStorage.setItem("datatablesPageSize", Index.pageSize.toString());
 
     // Datatables configuration
     dataTable = $(".datatables").DataTable({
@@ -116,6 +129,10 @@ export function doSearch(page) {
     // This allows for the regular search bar to be used in conjunction with categories.
     dataTable.column(".tags.itd").search(Index.selectedCategory);
 
+    // Store search parameters in localStorage for archive navigation
+    localStorage.setItem("currentSearch", currentSearch);
+    localStorage.setItem("selectedCategory", Index.selectedCategory);
+
     // Update search input field
     $("#search-input").val(currentSearch);
     dataTable.search(currentSearch);
@@ -165,7 +182,8 @@ export function renderColumn(namespace, type, data) {
                     // Don't capitalize URLs to avoid breaking the hotlink
                     tagText = tagText.replace(/\b./g, (m) => m.toUpperCase());
                 }
-                tagLinks += `<a style="cursor:pointer" href="${LRR.getTagSearchURL(namespace, tagText)}">${tagText}</a>, `;
+                const tagUrl = `${LRR.getTagSearchURL(namespace, tagText)}`;
+                tagLinks += `<a style="cursor:pointer" href="${LRR.encodeHTML(tagUrl)}">${LRR.encodeHTML(tagText)}</a>, `;
             });
 
             const spanTags = tagLinks.slice(0, -2); // remove the last comma and space
@@ -298,6 +316,21 @@ export function drawCallback() {
             $(".itg").show();
         }
 
+        // Store archive IDs in localStorage in the order they appear in the table,
+        // so the Reader can navigate to neighbors without re-querying.
+        const archiveIds = [];
+        const archives = dataTable.rows().data();
+        for (let i = 0; i < archives.length; i++) {
+            archiveIds.push(archives[i].arcid);
+        }
+        localStorage.setItem("currArchiveIds", JSON.stringify(archiveIds));
+        localStorage.setItem("currDatatablesPage", pageInfo.page + 1);
+
+        // Clear previous/next archive IDs when changing pages manually
+        // to avoid stale neighbors when using the browser back button.
+        localStorage.removeItem("previousArchiveIds");
+        localStorage.removeItem("nextArchiveIds");
+
         // Update url to contain all search parameters, and push it to the history
         if (isComingFromPopstate) {
             // But don't fire this if we're coming from popstate
@@ -317,24 +350,13 @@ export function drawCallback() {
             }
         }
 
-        let currentSort = dataTable.order()[0][0];
+        const sortColumn = dataTable.order()[0][0];
         const currentOrder = dataTable.order()[0][1];
+        const currentSort = dataTable.settings()[0].aoColumns[sortColumn].sName;
 
         // Save sort/order/page to localStorage
         localStorage.indexSort = currentSort;
         localStorage.indexOrder = currentOrder;
-
-        // get current columns count, except title and tags
-        const currentCustomColumnCount = dataTable.columns().count() - 2;
-        // check currentSort, if out of range, back to use title
-        if (currentSort > currentCustomColumnCount) {
-            localStorage.indexSort = 0;
-        }
-        if (currentSort >= 1 && currentSort <= Index.getColumnCount()) {
-            currentSort = localStorage.getItem(`customColumn${currentSort}`) || `Header ${currentSort}`;
-        } else {
-            currentSort = "title";
-        }
 
         Index.updateTableControls(currentSort, currentOrder, pageInfo.pages, pageInfo.page + 1);
 
@@ -357,7 +379,10 @@ export function buildURLParameters() {
     // Check each parameter and append them to the URL if they exist
     let params = "?";
     if (page !== 1) params += `p=${page}&`;
-    if (sortby !== 0) params += `sort=${sortby}&`;
+    if (sortby !== 0) {
+        const encodedSortBy = encodeURIComponent(dataTable.settings()[0].aoColumns[sortby].sName);
+        params += `sort=${encodedSortBy}&`;
+    }
     if (sortorder !== "asc") params += `sortdir=${sortorder}&`;
     if (encodedSearch !== "") params += `q=${encodedSearch}&`;
     if (cat !== "") params += `c=${cat}&`;
@@ -376,19 +401,23 @@ export function consumeURLParameters() {
     // Get order from URL, fallback to localstorage if available
     const order = [[0, "asc"]];
 
-    // Query params and localStorage values are always strings, parse them so order[0][0] is always
-    // a number. (This lets us correctly compare to 0 using !== above.)
+    // Resolve the sort sName to a column index.
+    // Unresolvable values (an old numeric bookmark, or a namespace with no column) fall back to title (0).
+    let sortName;
     if (params.has("sort")) {
-        order[0][0] = parseInt(params.get("sort"), 10);
-    } else if (localStorage.indexSort) {
-        order[0][0] = parseInt(localStorage.indexSort, 10);
+        sortName = params.get("sort");
+    } else {
+        console.info("No sort field in query params; falling back to localStorage.indexSort.");
+        sortName = localStorage.indexSort;
     }
-    // get current columns count, except title and tags
-    const currentCustomColumnCount = dataTable.columns().count() - 2;
-    // check currentSort, if out of range, back to use title
-    if (localStorage.indexSort > currentCustomColumnCount) {
-        localStorage.indexSort = 0;
-        order[0][0] = parseInt(localStorage.indexSort, 10);
+    if (sortName) {
+        const sortColumn = dataTable.settings()[0].aoColumns.findIndex((col) => col.sName === sortName);
+        if (sortColumn !== -1) {
+            order[0][0] = sortColumn;
+        } else {
+            console.warn(`Unresolvable sort "${sortName}"; no matching column, falling back to title.`);
+            order[0][0] = 0;
+        }
     }
 
     if (params.has("sortdir")) {

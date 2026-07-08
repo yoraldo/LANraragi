@@ -1,18 +1,34 @@
 /**
  * Functions that get used in multiple pages but don't really depend on networking.
  */
-import { createElement, render } from "preact";
+import { h, render } from "preact";
+import htm from "htm";
 import Swal from "sweetalert2";
 import { ToastContainer, toast as emitToast } from "react-toastify";
 
-import * as Index from "mod/index";
-import * as Server from "mod/server";
-import * as IndexTable from "mod/index_datatables";
 import I18N from "i18n";
 
+const html = htm.bind(h);
+
 let toastsInitialized = false;
-let isProgressLocal = true;          // Whether to use local (localStorage) progress tracking
-let isProgressAuthenticated = true;  // Whether progress requires authentication
+export let isProgressLocal = true;          // Whether to use local (localStorage) progress tracking
+export let isProgressAuthenticated = true;  // Whether progress requires authentication
+
+// Cache of archive/tankoubon data keyed by ID, populated whenever buildThumbnailDiv() renders a
+// thumbnail (main table thumbnail view, homepage carousel widgets, MSM selection carousel...).
+// Lets callers recover full data for an ID that isn't part of the current DataTables page,
+// e.g. archives only shown in the "On Deck"/"Random" homepage carousel widgets.
+const archiveDataCache = new Map();
+
+/**
+ * Retrieve cached archive/tankoubon data for a given ID, if any thumbnail was ever
+ * rendered for it during this session.
+ * @param {string} id Archive or Tankoubon ID
+ * @returns {object|undefined} The cached archive data, or undefined if not cached
+ */
+export function getArchiveData(id) {
+    return archiveDataCache.get(id);
+}
 
 function _get_baseurl_cookie() {
     let cookies = document.cookie;
@@ -127,7 +143,7 @@ export function getTagSearchURL(namespace, tag) {
     const namespacedTag = buildNamespacedTag(namespace, tag);
     if (namespace !== "source") {
         return new ApiURL(`/?q=${encodeURIComponent(namespacedTag)}$`);
-    } else if (/https?:\/\//.test(tag)) {
+    } else if (/^https?:\/\//.test(tag)) {
         return `${tag}`;
     } else {
         return `https://${tag}`;
@@ -259,13 +275,16 @@ export function buildTagsDiv(tags) {
         line += `<tr><td class='caption-namespace ${encodedK}-tag'>${ucKey}:</td><td>`;
 
         tagsByNamespace[key].forEach((tag) => {
-            const url = getTagSearchURL(key, tag);
+            const url = `${getTagSearchURL(key, tag)}`;
             const searchTag = buildNamespacedTag(key, tag);
 
             const tagText = encodeHTML(/^(date|time)/.test(key) ? convertTimestamp(tag) : tag);
 
             line += `<div class="gt">
-                        <a href="${url}" search="${encodeHTML(searchTag)}">
+                        <a href="${encodeHTML(url)}"`;
+            if (key !== "source") // Don't add the search attribute for source tags, since they are external links
+                line += ` search="${encodeHTML(searchTag)}"`;
+            line += `   >
                             ${tagText}
                         </a>
                     </div>`;
@@ -324,6 +343,7 @@ export function buildThumbnailDiv(data, tagTooltip = true) {
     const thumbCss = (localStorage.cropthumbs === "true") ? "id3" : "id3 nocrop";
     // The ID can be in a different field depending on the archive object...
     const id = data.arcid || data.id;
+    archiveDataCache.set(id, data);
     let reader_url = new ApiURL(`/reader?id=${id}`);
     const bookmarkIcon = buildBookmarkIconElement(id, "thumbnail-bookmark-icon");
 
@@ -554,8 +574,9 @@ export function toast(c) {
         initializeToasts();
     }
 
+    const innerHtml = `${c.heading ? `<h2>${c.heading}</h2>` : ""}${c.text ?? ""}`;
     return emitToast(
-        createElement("div", { dangerouslySetInnerHTML: { __html: `${c.heading ? `<h2>${c.heading}</h2>` : ""}${c.text ?? ""}` } }), (() => {
+        html`<div dangerouslySetInnerHTML=${{ __html: innerHtml }} />`, (() => {
             const toastType = c.icon || c.typel;
             const isWarningOrError = (toastType === "warning") || (toastType === "error");
             const autoCloseTime = {
@@ -581,122 +602,13 @@ export function toast(c) {
         })());
 }
 
-// #region Context Menu Functions
-
-/**
- * Build category list for contextMenu and checkoff the ones the given ID belongs to.
- * @param {*} catList The list of categories, obtained statically
- * @param {*} id The ID of the archive or tankoubon to check
- * @returns Categories
- */
-export function loadContextMenuCategories(catList, id){
-    return Server.callAPI(`/api/archives/${id}/categories`, "GET", null, I18N.IndexIdLoadError(id),
-        (data) => {
-            const items = {};
-
-            for (let i = 0; i < catList.length; i++) {
-                const catId = catList[i].id;
-
-                // If the category is also in the API results,
-                // we can pre-check it when creating the checkbox
-                const isSelected = data.categories.map((x) => x.id).includes(catId);
-                items[catId] = { name: catList[i].name, type: "checkbox" };
-                if (isSelected) { items[catId].selected = true; }
-
-                items[catId].events = {
-                    click() {
-                        if ($(this).is(":checked")) {
-                            Server.addArchiveToCategory(id, catId);
-                            if (typeof Index !== "undefined" && catId === localStorage.getItem("bookmarkCategoryId")) {
-                                Index.bookmarkIconOn(id);
-                            }
-                        } else {
-                            Server.removeArchiveFromCategory(id, catId);
-                            if (typeof Index !== "undefined" && catId === localStorage.getItem("bookmarkCategoryId")) {
-                                Index.bookmarkIconOff(id);
-                            }
-                        }
-                    },
-                };
-            }
-
-            if (Object.keys(items).length === 0) {
-                items.noop = { name: I18N.IndexNoCategories, icon: "far fa-sad-cry" };
-            }
-
-            return items;
-        },
-    );
-}
-
-/**
- * Build rating options for contextMenu and select the one for the current ID.
- * @param {*} id The ID of the archive to check
- * @param {*} refreshCallback Optional callback to refresh the view after rating change
- * @returns Ratings
- */
-export function loadContextMenuRatings(id, refreshCallback) {
-    return Server.callAPI(`/api/archives/${id}/metadata`, "GET", null, I18N.IndexIdLoadError(id),
-        (data) => {
-            const items = {};
-            const ratings = [{
-                name: I18N.IndexRemoveRating
-            }, {
-                name: "⭐",
-            }, {
-                name: "⭐⭐",
-            }, {
-                name: "⭐⭐⭐",
-            }, {
-                name: "⭐⭐⭐⭐",
-            }, {
-                name: "⭐⭐⭐⭐⭐",
-            }];
-            const tags = splitTagsByNamespace(data.tags);
-            const hasRating = Object.keys(tags).some(x => x === "rating");
-            const ratingValue = hasRating ? tags["rating"] : [0];
-
-            for (let i = 0; i < ratings.length; i++) {
-                items[i] = ratings[i];
-                items[i].type = "checkbox";
-
-                if (items[i].name === ratingValue[0]) { items[i].selected = true; }
-                items[i].events = {
-                    click() {
-                        if(i === 0) delete tags["rating"];
-                        else tags["rating"] = [ratings[i].name];
-
-                        Server.updateTagsFromArchive(id, buildTagList(tags));
-
-                        if (refreshCallback) {
-                            refreshCallback();
-                        } else if (IndexTable.dataTable) {
-                            IndexTable.dataTable.ajax.reload(null, false);
-                            Index.updateCarousel();
-                        }
-                        $(this).parents("ul.context-menu-list").find("input[type='checkbox']").toArray().filter((x) => x !== this).forEach(x => x.checked = false);
-                    },
-                };
-            }
-
-            return items;
-        },
-    );
-}
-
-// #endregion
-
 export function initializeToasts() {
     // Initialize toast.
     const toastDiv = document.createElement("div");
     document.body.appendChild(toastDiv);
     toastDiv.style.textAlign = "initial";
     render(
-        createElement(ToastContainer, {
-            style: {},
-            limit: 7,
-            theme: "light",
-        }, undefined), toastDiv);
+        html`<${ToastContainer} limit=${7} theme="light" style=${{}} />`, toastDiv);
     toastsInitialized = true;
 }
 

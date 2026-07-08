@@ -1,5 +1,6 @@
 #!/usr/bin/env perl
 
+use v5.36;
 use strict;
 use warnings;
 use utf8;
@@ -10,7 +11,7 @@ use Config;
 use feature    qw(say);
 use File::Path qw(make_path);
 
-use constant IS_UNIX => ( $Config{osname} ne 'MSWin32' );
+use constant IS_UNIX => ( $Config{osname} ne "MSWin32" );
 
 #Vendor dependencies
 my @vendor_css = (
@@ -38,6 +39,10 @@ my @vendor_js = (
     "/raty-js/build/raty.min.js",
     [ "/dompurify/dist/purify.es.mjs", "purify.js" ],
     "/sortablejs/Sortable.min.js",
+    [ "/htm/dist/htm.mjs", "htm.js" ],
+    '/@preact/signals/dist/signals.module.js',
+    '/@preact/signals/utils/dist/utils.module.js',
+    '/@preact/signals-core/dist/signals-core.module.js',
 );
 
 my @vendor_woff = (
@@ -113,11 +118,19 @@ if (IS_UNIX) {
     say("OK!");
 }
 
-#Check for GhostScript
-say("Checking for GhostScript...");
-can_run('gs')
-  or warn 'NOT FOUND! PDF support will not work properly. Please install the "gs" tool.';
-say("OK!");
+#Check for libvips
+#Note, this check is probably not perfect so it will only complain rather than stop the install
+say("Checking for libvips...");
+my $vips_found;
+if (can_check_lib()) {
+    $vips_found = has_lib("vips") || has_lib("vips-42");
+} else {
+    say("UNKNOWN - ExtUtils::Liblist is not available, so we can't check if libvips is installed. Will assume it is!");
+    $vips_found = 1;
+}
+$vips_found
+    ? say("OK!")
+    : say("NOT FOUND - Install libvips for much faster image processing and PDF support.\nlibvips may end up a requirement in future versions!");
 
 #Check for libarchive
 say("Checking for libarchive...");
@@ -125,23 +138,26 @@ Config::AutoConf->new()->check_header("archive.h")
   or die 'NOT FOUND! Please install libarchive and ensure its headers are present.';
 say("OK!");
 
-#Check for PerlMagick
-say("Checking for ImageMagick/PerlMagick...");
-my $imgk;
+if (!$vips_found) {
+    #Check for PerlMagick if libvips isn't installed
+    say("Checking for ImageMagick/PerlMagick...");
+    my $imgk;
 
-eval {
-    require Image::Magick;
-    $imgk = Image::Magick->QuantumDepth;
-};
+    eval {
+        require Image::Magick;
+        $imgk = Image::Magick->QuantumDepth;
+    };
 
-if ($@) {
-    say("NOT FOUND");
-    say("Please install ImageMagick with Perl for thumbnail support.");
-    say("Further instructions are available at https://www.imagemagick.org/script/perl-magick.php .");
-    say("The ImageMagick detection command returned: $imgk -- $@");
-} else {
-    say( "Returned QuantumDepth: " . $imgk );
-    say("OK!");
+    if ($@) {
+        say("NOT FOUND");
+        say("Please install libvips (recommended) OR ImageMagick with Perl installed for thumbnail support.");
+        say("libvips is probably available in your package manager if you run linux.");
+        say("Further instructions for ImageMagick are available at https://www.imagemagick.org/script/perl-magick.php .");
+        say("The ImageMagick detection command returned: $imgk -- $@");
+    } else {
+        say( "Returned QuantumDepth: " . $imgk );
+        say("OK!");
+    }
 }
 
 #Build & Install CPAN Dependencies
@@ -162,14 +178,15 @@ if ( $back || $full ) {
     } else {
         say("Installing dependencies for windows systems... (This will do nothing if the package is there already)");
 
-        install_package( "Win32::Process", $cpanopt );
-        install_package( "Win32::FileSystemHelper",
-            "https://github.com/Guerra24/Win32-FileSystemHelper/archive/308b92c958bb4931dfd704cc5025f93e28ef0c8a.zip " . $cpanopt );
-        install_package( "File::ChangeNotify::Watcher::Win32",
-            "https://github.com/Guerra24/File-ChangeNotify-Watcher-Win32/archive/7cb4e60823569cca8e7652d19b1ba5b5cac00a16.zip "
-              . $cpanopt );
-        install_package( "Win32API::File", $cpanopt );
+        install_package( "Win32::Process",                     $cpanopt );
+        install_package( "Win32::FileSystemHelper",            $cpanopt,
+            "https://github.com/Guerra24/Win32-FileSystemHelper/archive/308b92c958bb4931dfd704cc5025f93e28ef0c8a.zip" );
+        install_package( "File::ChangeNotify::Watcher::Win32", $cpanopt,
+            "https://github.com/Guerra24/File-ChangeNotify-Watcher-Win32/archive/7cb4e60823569cca8e7652d19b1ba5b5cac00a16.zip" );
+        install_package( "Win32API::File",                     $cpanopt );
     }
+
+    install_package( "Net::IDN::Encode", $cpanopt, "ETHER/Net-IDN-Encode-2.501-TRIAL.tar.gz" );
 
     if ( system( "cpanm --installdeps ./tools/. --notest" . $cpanopt ) != 0 ) {
         die "Something went wrong while installing Perl modules - Bailing out.";
@@ -217,9 +234,7 @@ say("   │              npm start              │");
 say("   │                                     │");
 say("   ╰─────────────────────────────────────╯");
 
-sub cp_node_module {
-
-    my ( $item, $newpath ) = @_;
+sub cp_node_module( $item, $newpath ) {
 
     my ( $nodename, $newname );
 
@@ -245,19 +260,37 @@ sub cp_node_module {
 
 }
 
-sub install_package {
+sub install_package( $package, $cpanopt, $url = undef ) {
 
-    my $package = $_[0];
-    my $cpanopt = $_[1];
-
-    ## no critic
-    eval "require $package";    #Run-time evals are needed here to check if the package has been properly installed.
-    ## use critic
-
-    if ($@) {
-        say("$package not installed! Trying to install now using cpanm$cpanopt");
-        system("cpanm --notest $package $cpanopt");
+    if ( !is_package_installed( $package ) ) {
+        say("$package not installed! Trying to install now using cpanm $cpanopt");
+        if ( system("cpanm --notest " . ( $url // $package ) . " $cpanopt") != 0 ) {
+            die "Something went wrong while installing $package - Bailing out.";
+        }
     } else {
         say("$package package installed, proceeding...");
     }
+
+}
+
+sub is_package_installed( $package ) {
+
+    ## no critic
+    eval "require $package"; #Run-time evals are needed here to check if the package has been properly installed.
+    ## use critic
+
+    return !$@;
+}
+
+sub has_lib( $lib ) {
+    local $SIG{__WARN__} = sub{};
+    my @libs = ExtUtils::Liblist->ext("-l${lib}");
+    return $libs[2];
+}
+
+sub can_check_lib {
+    eval {
+        require ExtUtils::Liblist;
+    };
+    return (!$@);
 }
