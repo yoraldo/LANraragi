@@ -2237,7 +2237,7 @@ async function loadDatatablesArchives(datatablesPage) {
 function returnToIndex() {
     const indexSearchQuery = localStorage.getItem("currentSearch") || "";
     const indexSelectedCategory = localStorage.getItem("selectedCategory") || "";
-    const indexSort = localStorage.getItem("indexSort") || "title";
+    const indexSort = localStorage.getItem("indexSort") || "date_added";
     const indexOrder = localStorage.getItem("indexOrder") || "asc";
     const currentDTPage = localStorage.getItem("currDatatablesPage") || "1";
     let returnUrl = "/";
